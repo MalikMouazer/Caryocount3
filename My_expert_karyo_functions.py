@@ -356,7 +356,7 @@ def calcul_scores(anomalies, clone_map):
             elif len(chroms) >= 2:
                 score_i = 2
                 if '?' in norm:
-                    explication = "Chromosome dérivé impliquant plusieurs chromosomes non completmetns identifiés (2 points)"
+                    explication = "Chromosome dérivé impliquant plusieurs chromosomes avec des imprécsions (2 points)"
                 else:
                     explication = "Chromosome dérivé impliquant plusieurs chromosomes (2 points)"
             else:

@@ -5,7 +5,6 @@ Ce projet utilise plusieurs bibliothèques open source. Les bibliothèques suiva
 ### Bibliothèques utilisées :
 
 - **openpyxl**
-  - Lien vers le projet : [https://github.com/openpyxl/openpyxl](https://github.com/openpyxl/openpyxl)
-
+  - Lien vers le projet : https://github.com/soxhub/openpyxl 
 - **et_xmlfile**
-  - Lien vers le projet : [https://github.com/et-xmlfile/et-xmlfile](https://github.com/et-xmlfile/et-xmlfile)
+  - Lien vers le projet : https://github.com/biydnd/et_xmlfile 

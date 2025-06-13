@@ -20,14 +20,18 @@ def get_chromosomes(anom):
         # Se limiter à la partie numérique avant un ")" ou une nouvelle parenthèse
         raw = re.split(r'[)()]', raw)[0]
         for num in raw.split(';'):
-            num = num.lstrip('?')
-            if num:
-                nums.add(num)
+            cleaned = num.lstrip('?')
+            if cleaned:
+                nums.add(cleaned)
+            elif '?' in num:
+                nums.add('?')
 
     # 2) Numéros mentionnés dans la seconde parenthèse des der(...)
     for _, second in re.findall(r'der\(([^)]*)\)\(([^)]*)\)', anom):
         for n in re.findall(r'\??(\d+)(?=[pq])', second):
             nums.add(n.lstrip('?'))
+        if '?' in second:
+            nums.add('?')
 
     return nums
 
@@ -351,7 +355,10 @@ def calcul_scores(anomalies, clone_map):
                 explication = "Chromosome dérivé non détaillé (2 points)"
             elif len(chroms) >= 2:
                 score_i = 2
-                explication = "Chromosome dérivé impliquant plusieurs chromosomes (2 points)"
+                if '?' in norm:
+                    explication = "Chromosome dérivé impliquant plusieurs chromosomes non completmetns identifiés (2 points)"
+                else:
+                    explication = "Chromosome dérivé impliquant plusieurs chromosomes (2 points)"
             else:
                 score_i = 1
                 explication = "Chromosome dérivé issu du même chromosome (1 point)"

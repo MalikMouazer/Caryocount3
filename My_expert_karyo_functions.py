@@ -4,14 +4,31 @@ import pandas as pd
 
 # Extraction des numéros de chromosome dans une anomalie ISCN
 def get_chromosomes(anom):
+    """Retourne l'ensemble des chromosomes impliqués dans ``anom``.
+
+    La fonction détecte les numéros apparaissant :
+    - juste après les mots clés (der, del, dup, t, ...)
+    - dans la seconde parenthèse des notations ``der(...)`` (apès les flèches)
+    - précédés d'un ``?`` comme dans ``t(?1;17)``
     """
-    Retourne l'ensemble des chromosomes impliqués dans l'anomalie,
-    basé sur les notations avant chaque parenthèse de type der, del, dup, ins, t, i, ider, idic.
-    """
-    nums = set()
-    for m in re.finditer(r'(?:der|dic|del|dup|ins|t|i|ider|idic|r)\(([0-9;]+)', anom):
-        for num in m.group(1).split(';'):
-            nums.add(num)
+
+    nums: set[str] = set()
+
+    # 1) Numéros directement après der(...), t(...), etc.
+    for m in re.finditer(r'(?:der|dic|del|dup|ins|t|i|ider|idic|r)\((\??[0-9;?]+)', anom):
+        raw = m.group(1)
+        # Se limiter à la partie numérique avant un ")" ou une nouvelle parenthèse
+        raw = re.split(r'[)()]', raw)[0]
+        for num in raw.split(';'):
+            num = num.lstrip('?')
+            if num:
+                nums.add(num)
+
+    # 2) Numéros mentionnés dans la seconde parenthèse des der(...)
+    for _, second in re.findall(r'der\(([^)]*)\)\(([^)]*)\)', anom):
+        for n in re.findall(r'\??(\d+)(?=[pq])', second):
+            nums.add(n.lstrip('?'))
+
     return nums
 
 # Parsing de la formule karyotypique

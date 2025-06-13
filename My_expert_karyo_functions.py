@@ -242,7 +242,9 @@ def detect_implicit_anomalies(anomalies):
                 implicit[an] = {"reason": "Gain/perte implicite", "ref": ref}
 
     # 3) Répétitions de la même anomalie (même chromosome)
-    base_pattern = re.compile(r'^(?:der|dic|del|dup|ins|t|i|ider|idic|r|add)\([0-9;]+\))')
+    base_pattern = re.compile(
+        r'^(?:der|dic|del|dup|ins|t|i|ider|idic|r|add)\([0-9;]+\)'
+    )
     base_map = {}
     for a in anomalies:
         norm = normalize_anomaly(a)

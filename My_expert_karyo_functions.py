@@ -100,14 +100,20 @@ def is_balanced_insertion(anom):
 def is_complex_multichr_deseq(anom):
     """
     Détecte les anomalies multichromosomiques déséquilibrées (≥2 chromosomes) pour 2 points.
+    Les chromosomes dérivés ("der") sont considérés complexes par définition
+    même si un seul numéro est explicitement indiqué.
     Renvoie False si un seul chromosome impliqué.
     """
+    # Les "der" sont toujours multichromosomiques
+    if anom.startswith('der'):
+        return True
+
     chroms = get_chromosomes(anom)
     # si un seul chromosome impliqué -> pas multi-chromosomique déséquilibrée
     if len(chroms) <= 1:
         return False
-    # dérivé, chromosome dicentrique ou anneau -> complexe multi-chromosomique
-    if anom.startswith('der') or anom.startswith('dic') or anom.startswith('r('):
+    # chromosome dicentrique ou anneau -> complexe multi-chromosomique
+    if anom.startswith('dic') or anom.startswith('r('):
         return True
     # insertion non pure -> complexe
     if 'ins(' in anom and not is_balanced_insertion(anom):
@@ -234,6 +240,22 @@ def detect_implicit_anomalies(anomalies):
                 ref_norm = multi_der[num][0]
                 ref = norm_to_orig.get(ref_norm, ref_norm)
                 implicit[an] = {"reason": "Gain/perte implicite", "ref": ref}
+
+    # 3) Répétitions de la même anomalie (même chromosome)
+    base_pattern = re.compile(r'^(?:der|dic|del|dup|ins|t|i|ider|idic|r|add)\([0-9;]+\))')
+    base_map = {}
+    for a in anomalies:
+        norm = normalize_anomaly(a)
+        m = base_pattern.match(norm)
+        base = m.group(0) if m else norm
+        base_map.setdefault(base, []).append(norm)
+    for norms in base_map.values():
+        if len(norms) > 1:
+            ref_norm = norms[0]
+            ref = norm_to_orig.get(ref_norm, ref_norm)
+            for n in norms[1:]:
+                if n not in implicit:
+                    implicit[n] = {"reason": "Duplication avec l'anomalie de référence", "ref": ref}
 
     return implicit
 

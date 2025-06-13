@@ -104,9 +104,14 @@ def is_complex_multichr_deseq(anom):
     même si un seul numéro est explicitement indiqué.
     Renvoie False si un seul chromosome impliqué.
     """
-    # Les "der" sont toujours multichromosomiques
+    # Cas particulier des chromosomes dérivés
     if anom.startswith('der'):
-        return True
+        # der(X) sans autre information est considéré comme multichromosomique
+        if anom.count('(') == 1:
+            return True
+        chroms = get_chromosomes(anom)
+        # s'il n'y a qu'un seul chromosome cité malgré les détails -> 1 point
+        return len(chroms) >= 2
 
     chroms = get_chromosomes(anom)
     # si un seul chromosome impliqué -> pas multi-chromosomique déséquilibrée
@@ -248,6 +253,11 @@ def detect_implicit_anomalies(anomalies):
     base_map = {}
     for a in anomalies:
         norm = normalize_anomaly(a)
+        # les gains/pertes répétés dans un même clone (ex: +8,+8)
+        # correspondent à une trisomie ou tetrasomie et ne doivent pas
+        # être considérés comme des duplications implicites
+        if norm.startswith(('+', '-')):
+            continue
         m = base_pattern.match(norm)
         base = m.group(0) if m else norm
         base_map.setdefault(base, []).append(norm)
@@ -316,7 +326,20 @@ def calcul_scores(anomalies, clone_map):
             score_i = 2
             explication = "Chromosome dicentrique (2 points)"
 
-        # e) Toutes les autres anomalies → scoring standard
+        # e) Chromosomes dérivés
+        elif norm.startswith('der'):
+            chroms = get_chromosomes(norm)
+            if norm.count('(') == 1:
+                score_i = 2
+                explication = "Chromosome dérivé non détaillé (2 points)"
+            elif len(chroms) >= 2:
+                score_i = 2
+                explication = "Chromosome dérivé impliquant plusieurs chromosomes (2 points)"
+            else:
+                score_i = 1
+                explication = "Chromosome dérivé issu du même chromosome (1 point)"
+
+        # f) Toutes les autres anomalies → scoring standard
         else:
             if is_single_chr_deseq(norm, cnt_norm):
                 score_i = 2

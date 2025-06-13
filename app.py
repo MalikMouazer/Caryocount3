@@ -5,6 +5,42 @@ import base64
 import io
 import openpyxl
 from My_expert_karyo_functions import analyser_formule
+# Utilitaire pour charger une feuille Google Sheets publique
+def load_google_sheet(url_or_id):
+    """Charge une feuille Google Sheets publique en DataFrame.
+
+    Parameters
+    ----------
+    url_or_id : str
+        L'URL complète ou l'identifiant de la feuille.
+
+    Returns
+    -------
+    tuple[pd.DataFrame | None, str | None]
+        Le DataFrame chargé, ou ``None`` en cas d'erreur, ainsi qu'un message
+        d'erreur éventuel.
+    """
+    if not url_or_id:
+        return None, "URL vide"
+
+    # Extraire l'identifiant du document
+    match = re.search(r"/d/([A-Za-z0-9_-]+)", url_or_id)
+    sheet_id = match.group(1) if match else url_or_id
+
+    # Extraire l'identifiant de feuille (gid) si présent
+    gid_match = re.search(r"gid=([0-9]+)", url_or_id)
+    gid = gid_match.group(1) if gid_match else "0"
+
+    csv_url = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+    )
+
+    try:
+        df = pd.read_csv(csv_url)
+        return df, None
+    except Exception as e:
+        return None, str(e)
+
 
 # Configuration de la page
 st.set_page_config(
@@ -142,15 +178,34 @@ with tab1:
 # Onglet 2: Analyse d'un fichier
 with tab2:
     st.subheader("Chargez un fichier contenant des formules caryotypiques")
-    uploaded_file = st.file_uploader("Choisir un fichier CSV ou Excel", type=["csv", "xlsx", "xls"])
-    
-    if uploaded_file is not None:
+    test_button = st.button("Analyser le fichier de tests")
+
+    uploaded_file = st.file_uploader(
+            "Choisir un fichier CSV ou Excel", type=["csv", "xlsx", "xls"], key="file"
+        )
+ 
+
+    df_input = None
+    if test_button:
+        TEST_SHEET_URL = (
+            "https://docs.google.com/spreadsheets/d/"
+            "1_QPAzEr3PNHaNVu8Qxuv_hWCUoBQqqRcNSnX-Q0Egm8/edit?gid=98233212#gid=98233212"
+        )
+        df_input, err = load_google_sheet(TEST_SHEET_URL)
+        if err:
+            st.error(f"Erreur lors du chargement du fichier de tests : {err}")
+            st.stop()
+    elif uploaded_file is not None:
+        # Déterminer le type de fichier
+        if uploaded_file.name.endswith('.csv'):
+            df_input = pd.read_csv(uploaded_file)
+        else:  # Excel
+            df_input = pd.read_excel(uploaded_file)
+
+
+
+    if df_input is not None:
         try:
-            # Déterminer le type de fichier
-            if uploaded_file.name.endswith('.csv'):
-                df_input = pd.read_csv(uploaded_file)
-            else:  # Excel
-                df_input = pd.read_excel(uploaded_file)
             
             # Rechercher la colonne Formule de manière insensible à la casse
             formule_col = None

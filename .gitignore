@@ -1,0 +1,30 @@
+# Environnement virtuel
+venv/
+
+
+# Caches Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Dossiers de dépendances copiés par erreur
+et_xmlfile/
+openpyxl/
+
+# Logs & temporaires
+*.log
+*.tmp
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Outils Python
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.cache/

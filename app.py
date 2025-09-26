@@ -73,11 +73,18 @@ def format_anomalies_html(anomalies_df):
     """
     html = ""
     for _, row in anomalies_df.iterrows():
-        anom = row['Anomalie']
-        type_anom = row['Type']
+        anom = html.escape(str(row['Anomalie']))
+        type_anom = html.escape(str(row['Type']))
         score = row['Score ISCN 2024']
-        clones = row['Clones']
-        explication = row['Explication']
+        clones_raw = row['Clones']
+        clones = html.escape(clones_raw.strip()) if isinstance(clones_raw, str) and clones_raw.strip() else '—'
+        explication_raw = row['Explication']
+        if isinstance(explication_raw, str) and explication_raw.strip():
+            explication = html.escape(explication_raw.strip())
+        elif explication_raw is None or (isinstance(explication_raw, float) and pd.isna(explication_raw)):
+            explication = '—'
+        else:
+            explication = html.escape(str(explication_raw))
         
         # Couleur de la puce selon le type d'anomalie
         if score == 2:
@@ -109,15 +116,24 @@ def format_anomalies_html(anomalies_df):
 
 # Fonction pour un affichage compact similaire à l'analyse par fichier
 def format_anomalies_compact(anomalies_df):
-    """Renvoie un HTML condensé pour la liste des anomalies"""
-    html = ""
+    """Renvoie un HTML condensé pour la liste des anomalies."""
+    blocks = []
     for _, row in anomalies_df.iterrows():
         score = row['Score ISCN 2024']
-        anomalie = row['Anomalie']
-        clones_list = row['Clones'].split(', ')
-        clones_clean = list(dict.fromkeys(clones_list))
-        clones = ', '.join(clones_clean)
-        explication = row['Explication']
+        anomalie = html.escape(str(row['Anomalie']))
+
+        clones_value = row['Clones'] if isinstance(row['Clones'], str) else ""
+        clones_list = [part.strip() for part in clones_value.split(',')] if clones_value else []
+        clones_clean = list(dict.fromkeys([clone for clone in clones_list if clone]))
+        clones = ', '.join(clones_clean) if clones_clean else '—'
+
+        explication_raw = row['Explication']
+        if isinstance(explication_raw, str) and explication_raw.strip():
+            explication = html.escape(explication_raw.strip())
+        elif explication_raw is None or (isinstance(explication_raw, float) and pd.isna(explication_raw)):
+            explication = '—'
+        else:
+            explication = html.escape(str(explication_raw))
 
         if score == 2:
             color = "#FF5733"
@@ -129,15 +145,16 @@ def format_anomalies_compact(anomalies_df):
             color = "#AAAAAA"
             score_text = "0pt"
 
-        html += f"""
-        <div style="margin: 2px 0; padding: 4px 8px; border-left: 3px solid {color}; background-color: #f9f9f9; font-size: 14px;">
-            <span style="font-weight: bold;">{clones}</span>
-            <span style="color: {color}; font-weight: bold;">[{anomalie}]</span>
-            <span style="background-color: #555; color: white; border-radius: 8px; padding: 1px 6px; font-size: 12px;">{score_text}</span>
-            <span style="color: #666; margin-left: 8px;">{explication}</span>
-        </div>
-        """
-    return html
+        blocks.append(
+            f'<div class="anomaly-compact" style="border-left-color: {color};">'
+            f'<span class="anomaly-clone">{html.escape(clones)}</span>'
+            f'<span class="anomaly-label" style="color: {color};">[{anomalie}]</span>'
+            f'<span class="anomaly-score">{score_text}</span>'
+            f'<span class="anomaly-explication">{explication}</span>'
+            '</div>'
+        )
+
+    return "\n".join(blocks)
 
 # Interface utilisateur
 st.markdown("""
@@ -487,6 +504,41 @@ st.markdown("""
     .anomaly-error {
         color: #b91c1c;
         font-weight: 600;
+    }
+
+    .anomaly-compact {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin: 2px 0;
+        padding: 4px 8px;
+        background-color: #f9f9f9;
+        border-left: 3px solid transparent;
+        border-radius: 4px;
+        font-size: 14px;
+        line-height: 1.4;
+    }
+
+    .anomaly-compact .anomaly-clone {
+        font-weight: 600;
+    }
+
+    .anomaly-compact .anomaly-label {
+        font-weight: 600;
+    }
+
+    .anomaly-compact .anomaly-score {
+        background-color: #555;
+        color: #fff;
+        border-radius: 999px;
+        padding: 1px 6px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    .anomaly-compact .anomaly-explication {
+        color: #666;
     }
 
     /* Style pour les lignes du tableau */

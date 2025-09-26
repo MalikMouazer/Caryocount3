@@ -488,6 +488,21 @@ st.markdown("""
         background-color: #ffffff;
     }
 
+    /* Ajuster la largeur des colonnes Formule et Anomalies détectées */
+    .results-table th:nth-child(2),
+    .results-table td:nth-child(2) {
+        width: 18%;
+        max-width: 18%;
+        white-space: nowrap;
+    }
+
+    .results-table th:last-child,
+    .results-table td:last-child {
+        width: 45%;
+        min-width: 45%;
+        white-space: normal;
+    }
+
     .results-table th {
         position: sticky;
         top: 0;

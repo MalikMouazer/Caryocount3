@@ -244,17 +244,35 @@ with tab2:
                 has_count_j = 'Count_j' in df_input.columns
 
                 def normalize_reference(value):
+                    """Nettoie les valeurs de référence pour permettre la comparaison."""
+
                     if isinstance(value, str):
                         trimmed = value.strip()
                         if not trimmed:
                             return None
-                        try:
-                            numeric = float(trimmed)
-                            if numeric.is_integer():
-                                return int(numeric)
-                            return numeric
-                        except ValueError:
-                            return trimmed
+
+                        # Retirer les icônes (✅, ❌, …) et autres caractères parasites
+                        cleaned = re.sub(r"[\u2705\u274c\u274e\u270a-\u27bf]", "", trimmed)
+                        cleaned = cleaned.replace("\u200b", "").strip()
+
+                        # Extraire la première valeur numérique éventuelle
+                        number_match = re.search(r"-?\d+(?:[\.,]\d+)?", cleaned)
+                        if number_match:
+                            raw_number = number_match.group(0).replace(",", ".")
+                            try:
+                                numeric = float(raw_number)
+                                if numeric.is_integer():
+                                    return int(numeric)
+                                return numeric
+                            except ValueError:
+                                pass
+
+                        # Traiter les valeurs textuelles signifiant l'absence de donnée
+                        if cleaned.lower() in {"na", "n/a", "null", "none", "-", "—"}:
+                            return None
+
+                        return cleaned or None
+
                     if pd.isna(value):
                         return None
                     if isinstance(value, float) and value.is_integer():

@@ -470,14 +470,18 @@ st.markdown("""
     .results-table-container {
         max-height: 500px;
         overflow-y: auto;
+        overflow-x: auto;
         border: 1px solid #e5e7eb;
         border-radius: 6px;
         margin-top: 1rem;
+        width: 100%;
+        max-width: 100%;
     }
 
     .results-table {
         width: 100%;
         border-collapse: collapse;
+        table-layout: fixed;
     }
 
     .results-table th,
@@ -486,20 +490,22 @@ st.markdown("""
         vertical-align: top;
         border-bottom: 1px solid #e5e7eb;
         background-color: #ffffff;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
 
     /* Ajuster la largeur des colonnes Formule et Anomalies détectées */
     .results-table th:nth-child(2),
     .results-table td:nth-child(2) {
-        width: 18%;
-        max-width: 18%;
-        white-space: nowrap;
+        width: 28%;
+        max-width: 28%;
+        white-space: normal;
     }
 
     .results-table th:last-child,
     .results-table td:last-child {
-        width: 45%;
-        min-width: 45%;
+        width: 40%;
+        min-width: 40%;
         white-space: normal;
     }
 

@@ -293,93 +293,98 @@ def detect_implicit_anomalies(anomalies):
     return implicit
 
 
-def calcul_scores(anomalies, clone_map):
-    """
-    Calcule les scores selon deux méthodes:
-    
-    Jondreville 2020 : 1 point par anomalie (toujours)
-    ISCN 2024     :
-      - 0 pt pour anomalies implicites (dérivés implicites & constitutionnelles)
-      - 2 pts pour déséquilibres unichr/multichr ou translocations déséquilibrées
-      - 1 pt pour anomalies standard
-    """
+def calcul_score_jondroville(anomalies):
+    """Calcule le score global selon Jondreville 2020."""
+
+    counts = Counter(anomalies)
+    total = 0
+    scores = {}
+
+    for anom in counts:
+        score = 1  # Chaque anomalie vaut 1 point
+        scores[anom] = score
+        total += score
+
+    return scores, total
+
+
+def calcul_score_iscn(anomalies, clone_map):
+    """Calcule le détail des scores selon la grille ISCN 2024."""
+
     counts = Counter(anomalies)
     norm_counts = Counter(normalize_anomaly(a) for a in anomalies)
-
     implicit_info = detect_implicit_anomalies(anomalies)
 
     rows = []
-    total_j = total_i = 0
+    total = 0
 
     for anom, cnt in counts.items():
-        score_j = 1  # Jondreville = 1 pour toutes
         norm = normalize_anomaly(anom)
         cnt_norm = norm_counts[norm]
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
         if re.match(r"^\+\d+c$", norm):
-            score_i = 0
+            score = 0
             explication = "Anomalie constitutionnelle (0 point)"
 
         # b) Anomalies détectées comme implicites
         elif norm in implicit_info:
             info = implicit_info[norm]
-            score_i = 0
+            score = 0
             explication = f"{info['reason']} ({info['ref']}) (0 point)"
 
         # c) Gains/pertes simples (analyse standard si non implicite)
         elif norm.startswith(("+", "-")):
             if is_single_chr_deseq(norm, cnt_norm):
-                score_i = 2
+                score = 2
                 explication = "Déséquilibre unichromosomique (2 points)"
             elif is_complex_multichr_deseq(norm):
-                score_i = 2
+                score = 2
                 explication = "Déséquilibre multichromosomique complexe (2 points)"
             elif is_unbalanced_translocation(norm):
-                score_i = 2
+                score = 2
                 explication = "Translocation déséquilibrée (2 points)"
             else:
-                score_i = 1
+                score = 1
                 explication = "Anomalie standard (1 point)"
 
         # d) Chromosomes dicentriques → 2 points
         elif norm.startswith('dic'):
-            score_i = 2
+            score = 2
             explication = "Chromosome dicentrique (2 points)"
 
         # e) Chromosomes dérivés
         elif norm.startswith('der'):
             chroms = get_chromosomes(norm)
             if norm.count('(') == 1:
-                score_i = 2
+                score = 2
                 explication = "Chromosome dérivé non détaillé (2 points)"
             elif len(chroms) >= 2:
-                score_i = 2
+                score = 2
                 if '?' in norm:
                     explication = "Chromosome dérivé impliquant plusieurs chromosomes avec des imprécsions (2 points)"
                 else:
                     explication = "Chromosome dérivé impliquant plusieurs chromosomes (2 points)"
             else:
-                score_i = 1
+                score = 1
                 explication = "Chromosome dérivé issu du même chromosome (1 point)"
 
         # f) Toutes les autres anomalies → scoring standard
         else:
             if is_single_chr_deseq(norm, cnt_norm):
-                score_i = 2
+                score = 2
                 explication = "Déséquilibre unichromosomique (2 points)"
             elif is_complex_multichr_deseq(norm):
-                score_i = 2
+                score = 2
                 explication = "Déséquilibre multichromosomique complexe (2 points)"
             elif is_unbalanced_translocation(norm):
-                score_i = 2
+                score = 2
                 explication = "Translocation déséquilibrée (2 points)"
             else:
-                score_i = 1
+                score = 1
                 explication = "Anomalie standard (1 point)"
 
-        total_j += score_j
-        total_i += score_i
+        total += score
 
         rows.append({
             "Anomalie": anom,
@@ -387,8 +392,7 @@ def calcul_scores(anomalies, clone_map):
             "Explication": explication,
             "Occurrences": cnt,
             "Clones": ", ".join(clone_map.get(anom, [])),
-            "Score Jondreville 2020": score_j,
-            "Score ISCN 2024": score_i,
+            "Score ISCN 2024": score,
         })
 
     # Ligne de totaux
@@ -398,23 +402,28 @@ def calcul_scores(anomalies, clone_map):
         "Explication": "",
         "Occurrences": "",
         "Clones": "",
-        "Score Jondreville 2020": total_j,
-        "Score ISCN 2024": total_i,
+        "Score ISCN 2024": total,
     })
 
-    return pd.DataFrame(rows), total_i
+    return pd.DataFrame(rows), total
 
 # Fonction pour analyser une formule caryotypique
 def analyser_formule(formule):
     """
     Analyse une formule caryotypique et retourne:
     - Le DataFrame des anomalies détectées
-    - Le score total
+    - Un dictionnaire de scores totaux (ISCN et Jondreville)
     - Une erreur éventuelle
     """
     try:
         anomalies, clone_map = parse_caryotype(formule)
-        df, total = calcul_scores(anomalies, clone_map)
-        return df, total, None
+        df_iscn, total_iscn = calcul_score_iscn(anomalies, clone_map)
+        jondroville_scores, total_jondroville = calcul_score_jondroville(anomalies)
+
+        df_iscn["Score Jondreville 2020"] = df_iscn["Anomalie"].apply(
+            lambda anom: total_jondroville if anom == "TOTAL" else jondroville_scores.get(anom, 0)
+        )
+
+        return df_iscn, {"iscn": total_iscn, "jondroville": total_jondroville}, None
     except Exception as e:
-        return None, 0, f"Erreur lors de l'analyse de la formule: {str(e)}"
+        return None, {"iscn": 0, "jondroville": 0}, f"Erreur lors de l'analyse de la formule: {str(e)}"

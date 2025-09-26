@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import base64
 import io
+import html
 import openpyxl
 from My_expert_karyo_functions import analyser_formule
 # Utilitaire pour charger une feuille Google Sheets publique
@@ -338,54 +339,67 @@ with tab2:
                         return str(int(value))
                     return str(value)
 
-                display_config = [
-                    ("Ligne", 1),
-                    ("Formule", 3),
-                    ("Comptage ISCN", 1),
-                ]
+                display_labels = ["Ligne", "Formule", "Comptage ISCN"]
                 if has_count_i:
-                    display_config.append(("Ref ISCN", 1))
-                display_config.append(("Comptage Jon", 1))
+                    display_labels.append("Ref ISCN")
+                display_labels.append("Comptage Jon")
                 if has_count_j:
-                    display_config.append(("Ref Jon", 1))
-                display_config.append(("Anomalies détectées", 4))
+                    display_labels.append("Ref Jon")
+                display_labels.append("Anomalies détectées")
 
                 # Affichage des résultats
                 st.markdown("### Résultats de l'analyse")
 
-                header_cols = st.columns([cfg[1] for cfg in display_config])
-                for col_obj, (label, _) in zip(header_cols, display_config):
-                    with col_obj:
-                        st.markdown(f"**{label}**")
+                header_html = "".join(
+                    f"<th>{html.escape(label)}</th>" for label in display_labels
+                )
 
-                # Afficher chaque ligne
+                body_rows = []
                 for i, (_, row_data) in enumerate(results_df.iterrows()):
                     anomalies = all_anomalies_details[i]
                     matches = match_details[i]
+                    cells = []
 
-                    line_cols = st.columns([cfg[1] for cfg in display_config])
-                    for col_obj, (label, _) in zip(line_cols, display_config):
-                        with col_obj:
-                            if label == "Comptage ISCN":
-                                text = format_display(row_data[label])
-                                if matches["iscn"] is not None:
-                                    text = f"{text} {'✅' if matches['iscn'] else '❌'}"
-                                st.markdown(text)
-                            elif label == "Comptage Jon":
-                                text = format_display(row_data[label])
-                                if matches["jon"] is not None:
-                                    text = f"{text} {'✅' if matches['jon'] else '❌'}"
-                                st.markdown(text)
-                            elif label == "Anomalies détectées":
-                                if anomalies["error"]:
-                                    st.error(anomalies["message"])
-                                else:
-                                    html = format_anomalies_compact(anomalies["df"])
-                                    st.markdown(html, unsafe_allow_html=True)
+                    for label in display_labels:
+                        if label == "Comptage ISCN":
+                            text = format_display(row_data.get(label))
+                            if matches["iscn"] is not None:
+                                text = f"{text} {'✅' if matches['iscn'] else '❌'}"
+                            cells.append(f"<td>{html.escape(text)}</td>")
+                        elif label == "Comptage Jon":
+                            text = format_display(row_data.get(label))
+                            if matches["jon"] is not None:
+                                text = f"{text} {'✅' if matches['jon'] else '❌'}"
+                            cells.append(f"<td>{html.escape(text)}</td>")
+                        elif label == "Anomalies détectées":
+                            if anomalies["error"]:
+                                message = html.escape(anomalies["message"])
+                                cells.append(
+                                    f"<td><div class=\"anomaly-error\">{message}</div></td>"
+                                )
                             else:
-                                st.markdown(format_display(row_data.get(label)))
+                                anomalies_html = format_anomalies_compact(anomalies["df"])
+                                cells.append(f"<td>{anomalies_html}</td>")
+                        else:
+                            value = format_display(row_data.get(label))
+                            cells.append(f"<td>{html.escape(value)}</td>")
 
-                    st.markdown("---")
+                    body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+                table_html = f"""
+                <div class="results-table-container">
+                    <table class="results-table">
+                        <thead>
+                            <tr>{header_html}</tr>
+                        </thead>
+                        <tbody>
+                            {''.join(body_rows)}
+                        </tbody>
+                    </table>
+                </div>
+                """
+
+                st.markdown(table_html, unsafe_allow_html=True)
 
                 # Statistiques de correspondance
                 if has_count_i or has_count_j:
@@ -429,13 +443,52 @@ st.markdown("""
     .download-button:hover {
         background-color: #45a049;
     }
-    
+
     h3 {
         margin-top: 30px;
         margin-bottom: 20px;
         color: #1E3A8A;
     }
-    
+
+    .results-table-container {
+        max-height: 500px;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        margin-top: 1rem;
+    }
+
+    .results-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .results-table th,
+    .results-table td {
+        padding: 12px;
+        vertical-align: top;
+        border-bottom: 1px solid #e5e7eb;
+        background-color: #ffffff;
+    }
+
+    .results-table th {
+        position: sticky;
+        top: 0;
+        background-color: #f1f5ff;
+        z-index: 2;
+        text-align: left;
+        font-weight: 600;
+    }
+
+    .results-table tbody tr:nth-child(even) td {
+        background-color: #f9fafb;
+    }
+
+    .anomaly-error {
+        color: #b91c1c;
+        font-weight: 600;
+    }
+
     /* Style pour les lignes du tableau */
     .stExpander {
         border: none !important;

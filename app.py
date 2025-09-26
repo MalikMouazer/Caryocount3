@@ -156,22 +156,25 @@ with tab1:
     
     if st.button("Analyser la formule", key="analyser_formule"):
         if formule:
-            df, total, error = analyser_formule(formule)
+            df, totals, error = analyser_formule(formule)
             if error:
                 st.error(error)
             else:
-                st.success(f"Nombre total d'anomalies détectées: {total}")
-                
+                st.success(
+                    f"Scores détectés — ISCN: {totals['iscn']} | Jondreville: {totals['jondroville']}"
+                )
+
                 # Affichage du tableau avec info-bulles
                 st.markdown("### Détail des anomalies")
-                
+
                 # Formatage des anomalies pour l'affichage
                 anomalies_df = df.iloc[:-1]  # Exclure la ligne TOTAL
                 anomalies_html = format_anomalies_compact(anomalies_df)
                 st.markdown(anomalies_html, unsafe_allow_html=True)
-                
+
                 # Affichage du total
-                st.markdown(f"**Score total: {total}**")
+                st.markdown(f"**Score total ISCN: {totals['iscn']}**")
+                st.markdown(f"**Score total Jondreville: {totals['jondroville']}**")
         else:
             st.warning("Veuillez entrer une formule caryotypique.")
 
@@ -220,118 +223,187 @@ with tab2:
                 # Renommer la colonne trouvée en 'Formule' pour simplifier la suite
                 if formule_col != 'Formule':
                     df_input = df_input.rename(columns={formule_col: 'Formule'})
-                # Vérifier si la colonne Count existe
-                has_count = 'Count' in df_input.columns
-                
+
+                # Détection et renommage des colonnes de référence
+                count_i_col = None
+                count_j_col = None
+                for col in df_input.columns:
+                    norm = col.strip().lower()
+                    if norm == 'count_i':
+                        count_i_col = col
+                    elif norm == 'count_j':
+                        count_j_col = col
+
+                if count_i_col and count_i_col != 'Count_i':
+                    df_input = df_input.rename(columns={count_i_col: 'Count_i'})
+                if count_j_col and count_j_col != 'Count_j':
+                    df_input = df_input.rename(columns={count_j_col: 'Count_j'})
+
+                has_count_i = 'Count_i' in df_input.columns
+                has_count_j = 'Count_j' in df_input.columns
+
+                def normalize_reference(value):
+                    if isinstance(value, str):
+                        trimmed = value.strip()
+                        if not trimmed:
+                            return None
+                        try:
+                            numeric = float(trimmed)
+                            if numeric.is_integer():
+                                return int(numeric)
+                            return numeric
+                        except ValueError:
+                            return trimmed
+                    if pd.isna(value):
+                        return None
+                    if isinstance(value, float) and value.is_integer():
+                        return int(value)
+                    return value
+
                 # Création du DataFrame de résultats
                 results = []
                 all_anomalies_details = []
+                match_details = []
 
                 for idx, row in df_input.iterrows():
                     formule_fichier = row['Formule']
-                    count_manuel = row['Count'] if has_count else None
+                    ref_iscn_value = normalize_reference(row['Count_i']) if has_count_i else None
+                    ref_jondroville_value = normalize_reference(row['Count_j']) if has_count_j else None
 
-                    df_analyse, count_auto, error = analyser_formule(formule_fichier)
-                    
+                    df_analyse, totals, error = analyser_formule(formule_fichier)
+
+                    match_detail = {"iscn": None, "jon": None}
+
                     if error:
                         anomalies_detail = error
-                        match = "❌" if has_count else "N/A"
+                        comptage_iscn = "Erreur"
+                        comptage_jondroville = "Erreur"
                         all_anomalies_details.append({"error": True, "message": error})
                     else:
                         # Extraction des détails des anomalies
                         anomalies_df = df_analyse.iloc[:-1]  # Exclure la ligne TOTAL
-                        
+
                         # Stocker les détails pour l'affichage
                         all_anomalies_details.append({"error": False, "df": anomalies_df})
-                        
+
                         # Texte simple pour l'export
                         anomalies_detail = ", ".join([
-                            f"{row['Anomalie']} ({row['Type']}): {row['Score ISCN 2024']} pts"
-                            for _, row in anomalies_df.iterrows()
+                            f"{row_detail['Anomalie']} ({row_detail['Type']}): {row_detail['Score ISCN 2024']} pts"
+                            for _, row_detail in anomalies_df.iterrows()
                         ])
-                        
-                        # Vérification de la correspondance si Count est disponible
-                        match = "✅" if has_count and count_auto == count_manuel else "❌" if has_count else "N/A"
-                    
+
+                        comptage_iscn = totals['iscn']
+                        comptage_jondroville = totals['jondroville']
+
+                        if has_count_i and ref_iscn_value is not None:
+                            match_detail['iscn'] = comptage_iscn == ref_iscn_value
+                        if has_count_j and ref_jondroville_value is not None:
+                            match_detail['jon'] = comptage_jondroville == ref_jondroville_value
+
+                    match_details.append(match_detail)
+
                     result_row = {
                         "Ligne": idx + 1,  # +1 pour ne pas inclure l'en-tête du fichier
                         "Formule": formule_fichier,
-                        "Comptage automatique": count_auto if not error else "Erreur",
+                        "Comptage ISCN": comptage_iscn,
+                        "Comptage Jon": comptage_jondroville,
                         "Anomalies détectées": anomalies_detail  # Version texte pour l'export
                     }
-                    
-                    # Ajouter le comptage manuel si disponible
-                    if has_count:
-                        result_row["Comptage manuel"] = count_manuel
-                        result_row["Correspondance"] = match
-                    
+
+                    if has_count_i:
+                        result_row["Ref ISCN"] = ref_iscn_value
+                    if has_count_j:
+                        result_row["Ref Jon"] = ref_jondroville_value
+
                     results.append(result_row)
-                
-                # Création du DataFrame de résultats
+
+                # Création du DataFrame de résultats avec un ordre de colonnes défini
                 results_df = pd.DataFrame(results)
-                
+                columns_order = ["Ligne", "Formule", "Comptage ISCN"]
+                if has_count_i:
+                    columns_order.append("Ref ISCN")
+                columns_order.append("Comptage Jon")
+                if has_count_j:
+                    columns_order.append("Ref Jon")
+                columns_order.append("Anomalies détectées")
+                results_df = results_df[columns_order]
+
+                # Fonctions utilitaires pour l'affichage
+                def format_display(value):
+                    if isinstance(value, str):
+                        return value
+                    if pd.isna(value):
+                        return "—"
+                    if isinstance(value, float) and value.is_integer():
+                        return str(int(value))
+                    return str(value)
+
+                display_config = [
+                    ("Ligne", 1),
+                    ("Formule", 3),
+                    ("Comptage ISCN", 1),
+                ]
+                if has_count_i:
+                    display_config.append(("Ref ISCN", 1))
+                display_config.append(("Comptage Jon", 1))
+                if has_count_j:
+                    display_config.append(("Ref Jon", 1))
+                display_config.append(("Anomalies détectées", 4))
+
                 # Affichage des résultats
                 st.markdown("### Résultats de l'analyse")
-                
-                # Créer un en-tête de tableau personnalisé
-                cols = st.columns([1, 3, 1, 1, 1, 4] if has_count else [1, 3, 1, 6])
-                with cols[0]:
-                    st.markdown("**Ligne**")
-                with cols[1]:
-                    st.markdown("**Formule**")
-                with cols[2]:
-                    st.markdown("**Comptage auto**")
-                if has_count:
-                    with cols[3]:
-                        st.markdown("**Comptage manuel**")
-                    with cols[4]:
-                        st.markdown("**Correspondance**")
-                with cols[-1]:
-                    st.markdown("**Anomalies détectées**")
-                
-                # Afficher chaque ligne avec un expander pour les anomalies
+
+                header_cols = st.columns([cfg[1] for cfg in display_config])
+                for col_obj, (label, _) in zip(header_cols, display_config):
+                    with col_obj:
+                        st.markdown(f"**{label}**")
+
+                # Afficher chaque ligne
                 for i, (_, row_data) in enumerate(results_df.iterrows()):
                     anomalies = all_anomalies_details[i]
+                    matches = match_details[i]
 
-                    # Créer une ligne de tableau
-                    cols = st.columns([1, 3, 1, 1, 1, 4] if has_count else [1, 3, 1, 6])
+                    line_cols = st.columns([cfg[1] for cfg in display_config])
+                    for col_obj, (label, _) in zip(line_cols, display_config):
+                        with col_obj:
+                            if label == "Comptage ISCN":
+                                text = format_display(row_data[label])
+                                if matches["iscn"] is not None:
+                                    text = f"{text} {'✅' if matches['iscn'] else '❌'}"
+                                st.markdown(text)
+                            elif label == "Comptage Jon":
+                                text = format_display(row_data[label])
+                                if matches["jon"] is not None:
+                                    text = f"{text} {'✅' if matches['jon'] else '❌'}"
+                                st.markdown(text)
+                            elif label == "Anomalies détectées":
+                                if anomalies["error"]:
+                                    st.error(anomalies["message"])
+                                else:
+                                    html = format_anomalies_compact(anomalies["df"])
+                                    st.markdown(html, unsafe_allow_html=True)
+                            else:
+                                st.markdown(format_display(row_data.get(label)))
 
-                    # Numéro de ligne
-                    with cols[0]:
-                        st.markdown(f"{row_data['Ligne']}")
-
-                    # Formule
-                    with cols[1]:
-                        st.markdown(f"{row_data['Formule']}")
-
-                    # Comptage automatique
-                    with cols[2]:
-                        st.markdown(f"{row_data['Comptage automatique']}")
-
-                    # Comptage manuel et correspondance (si disponible)
-                    if has_count:
-                        with cols[3]:
-                            st.markdown(f"{row_data['Comptage manuel']}")
-                        with cols[4]:
-                            st.markdown(f"{row_data['Correspondance']}")
-
-                    # Anomalies détectées avec expander
-                    with cols[-1]:
-                        if anomalies["error"]:
-                            st.error(anomalies["message"])
-                        else:
-                            html = format_anomalies_compact(anomalies["df"])
-                            st.markdown(html, unsafe_allow_html=True)
-                                        
-                    # Ligne de séparation
                     st.markdown("---")
-                
-                # Statistiques si Count est disponible
-                if has_count:
-                    nb_total = len(results_df)
-                    nb_match = results_df['Correspondance'].value_counts().get("✅", 0)
-                    st.success(f"Correspondance: {nb_match}/{nb_total} ({int(nb_match/nb_total*100 if nb_total else 0)}%)")
-                
+
+                # Statistiques de correspondance
+                if has_count_i or has_count_j:
+                    if has_count_i:
+                        total_i = sum(1 for m in match_details if m["iscn"] is not None)
+                        match_i = sum(1 for m in match_details if m["iscn"])
+                        if total_i:
+                            st.success(
+                                f"Correspondance ISCN: {match_i}/{total_i} ({int(match_i/total_i*100)}%)"
+                            )
+                    if has_count_j:
+                        total_j = sum(1 for m in match_details if m["jon"] is not None)
+                        match_j = sum(1 for m in match_details if m["jon"])
+                        if total_j:
+                            st.success(
+                                f"Correspondance Jondreville: {match_j}/{total_j} ({int(match_j/total_j*100)}%)"
+                            )
+
                 # Option d'export Excel
                 st.subheader("Exporter les résultats")
                 st.markdown(get_excel_download_link(results_df), unsafe_allow_html=True)

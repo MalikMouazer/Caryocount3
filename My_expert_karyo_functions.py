@@ -37,37 +37,77 @@ def get_chromosomes(anom):
 
 # Parsing de la formule karyotypique
 def parse_caryotype(chaine_iscn):
-    """
-    Parse une chaîne ISCN avec clones séparés par '/'.
-    Renvoie la liste plate des anomalies et un dict {anom: [clones]}.
-    Gère aussi les anomalies de ploidie (≠46).
+    """Parse une chaîne ISCN et renvoie les anomalies par clone.
+
+    Returns
+    -------
+    tuple[list[str], dict[str, list[str]], list[dict[str, str]]]
+        - Liste plate des anomalies (ordre d'apparition)
+        - Mapping ``anomalie -> [clone1, clone2, ...]``
+        - Liste d'entrées ``{"anomaly": str, "clone": str}``
     """
     # Remove all whitespace for robust parsing
     chaine_iscn = re.sub(r"\s+", "", chaine_iscn)
     
     anomalies = []
     clone_map = {}
+    entries: list[dict[str, str]] = []
     clones = [re.sub(r"\[.*?\]", "", c) for c in chaine_iscn.split('/')]
     for idx, clone in enumerate(clones, start=1):
+        clone_name = f"clone{idx}"
         parts = [p.strip().strip('.') for p in clone.split(',') if p.strip()]
         # Détection de la ploidie
         try:
-            total = int(re.sub(r"\D", "", parts[0]))
-            if total != 46:
-                if total == 92:
-                    pl = 'Tetraploidy'
-                elif total == 69:
-                    pl = 'Triploidy'
+            ploidy_token = parts[0]
+            # Les notations XX<2n> servent à indiquer les métaphases et ne doivent
+            # pas être confondues avec une anomalie de ploidie.
+            if '<2n>' not in ploidy_token:
+                match = re.search(r"\d+", ploidy_token)
+                total = int(match.group()) if match else None
+            else:
+                total = None
 
-                anomalies.append(pl)
-                clone_map.setdefault(pl, []).append(f"clone{idx}")
+            if total and total != 46:
+                if 58 <= total <= 80:
+                    pl = 'Triploidy'
+                elif 81 <= total <= 103:
+                    pl = 'Tetraploidy'
+                else:
+                    pl = None
+
+                if pl:
+                    anomalies.append(pl)
+                    clone_map.setdefault(pl, []).append(clone_name)
+                    entries.append({"anomaly": pl, "clone": clone_name})
         except Exception:
             pass
         # Extraction des anomalies structurelles
         for an in parts[2:]:
             anomalies.append(an)
-            clone_map.setdefault(an, []).append(f"clone{idx}")
-    return anomalies, clone_map
+            clone_map.setdefault(an, []).append(clone_name)
+            entries.append({"anomaly": an, "clone": clone_name})
+    return anomalies, clone_map, entries
+
+
+def display_clone_label(clone_name: str) -> str:
+    """Retourne un libellé "Clone N" lisible pour un identifiant interne."""
+
+    if not clone_name:
+        return ""
+    m = re.match(r"clone(\d+)", clone_name, re.IGNORECASE)
+    if m:
+        return f"Clone {m.group(1)}"
+    return clone_name.capitalize()
+
+
+def is_repeat_notation(anom: str) -> bool:
+    """Détecte les notations de répétition d'anomalies (idem, sl, sdl...)."""
+    base = anom.strip().lower()
+    if base == 'idem':
+        return True
+    if re.match(r'^(?:sl|sdl)\d*$', base):
+        return True
+    return False
 
 # Détection des anomalies unichromosomiques déséquilibrées de poids 2
 def is_single_chr_deseq(anom, count):
@@ -155,6 +195,8 @@ def type_anomalie(anom):
     Détermine le type d'anomalie pour l'affichage.
     Retourne une chaîne décrivant le type d'anomalie.
     """
+    if is_repeat_notation(anom):
+        return 'Notation de répétition d’anomalies'
     if is_complex_multichr_deseq(anom):
         return 'Multichromosomique déséquilibrée'
     if is_balanced_translocation(anom):
@@ -179,8 +221,16 @@ def type_anomalie(anom):
         return 'Chromosome dérivé'
     if anom.startswith('ins'):
         return 'Insertion'
+    if anom.startswith('inv'):
+        return 'Inversion'
     if anom.startswith('t('):
         return 'Translocation'
+    if anom.startswith('add'):
+        return 'Addition'
+    if anom == 'Triploidy':
+        return 'Triploïdie'
+    if anom == 'Tetraploidy':
+        return 'Tétraploïdie'
     if anom.startswith('+'):
         return 'Gain chr' + re.sub(r"\D", "", anom)
     if anom.startswith('-'):
@@ -299,13 +349,28 @@ def calcul_score_jondroville(anomalies):
     counts = Counter(anomalies)
     total = 0
     scores = {}
+    explanations = {}
 
     for anom in counts:
-        score = 1  # Chaque anomalie vaut 1 point
+        norm = normalize_anomaly(anom)
+        # Ignorer les anomalies constitutionnelles (+Nc)
+        if re.match(r"^\+\d+c$", norm):
+            score = 0
+            explanation = "Anomalie constitutionnelle"
+        elif is_repeat_notation(norm):
+            score = 0
+            explanation = "Anomalies déjà connues dans un autre clone"
+        elif norm.lower() == 'triploidy':
+            score = 0
+            explanation = "Triploïdie ignorée dans le calcul"
+        else:
+            score = 1  # Chaque anomalie non-constitutionnelle vaut 1 point
+            explanation = "Anomalie non constitutionnelle"
         scores[anom] = score
+        explanations[anom] = explanation
         total += score
 
-    return scores, total
+    return scores, explanations, total
 
 
 def calcul_score_iscn(anomalies, clone_map):
@@ -325,64 +390,68 @@ def calcul_score_iscn(anomalies, clone_map):
         # a) Constitutionnelles (+Nc) → ISCN = 0
         if re.match(r"^\+\d+c$", norm):
             score = 0
-            explication = "Anomalie constitutionnelle (0 point)"
+            explication = "Anomalie constitutionnelle"
+
+        elif is_repeat_notation(norm):
+            score = 0
+            explication = "Anomalies déjà connues dans un autre clone"
 
         # b) Anomalies détectées comme implicites
         elif norm in implicit_info:
             info = implicit_info[norm]
             score = 0
-            explication = f"{info['reason']} ({info['ref']}) (0 point)"
+            explication = f"{info['reason']} ({info['ref']})"
 
         # c) Gains/pertes simples (analyse standard si non implicite)
         elif norm.startswith(("+", "-")):
             if is_single_chr_deseq(norm, cnt_norm):
                 score = 2
-                explication = "Déséquilibre unichromosomique (2 points)"
+                explication = "Déséquilibre unichromosomique"
             elif is_complex_multichr_deseq(norm):
                 score = 2
-                explication = "Déséquilibre multichromosomique complexe (2 points)"
+                explication = "Déséquilibre multichromosomique complexe"
             elif is_unbalanced_translocation(norm):
                 score = 2
-                explication = "Translocation déséquilibrée (2 points)"
+                explication = "Translocation déséquilibrée"
             else:
                 score = 1
-                explication = "Anomalie standard (1 point)"
+                explication = "Anomalie standard"
 
         # d) Chromosomes dicentriques → 2 points
         elif norm.startswith('dic'):
             score = 2
-            explication = "Chromosome dicentrique (2 points)"
+            explication = "Chromosome dicentrique"
 
         # e) Chromosomes dérivés
         elif norm.startswith('der'):
             chroms = get_chromosomes(norm)
             if norm.count('(') == 1:
                 score = 2
-                explication = "Chromosome dérivé non détaillé (2 points)"
+                explication = "Chromosome dérivé non détaillé"
             elif len(chroms) >= 2:
                 score = 2
                 if '?' in norm:
-                    explication = "Chromosome dérivé impliquant plusieurs chromosomes avec des imprécsions (2 points)"
+                    explication = "Chromosome dérivé impliquant plusieurs chromosomes avec des imprécisions"
                 else:
-                    explication = "Chromosome dérivé impliquant plusieurs chromosomes (2 points)"
+                    explication = "Chromosome dérivé impliquant plusieurs chromosomes"
             else:
                 score = 1
-                explication = "Chromosome dérivé issu du même chromosome (1 point)"
+                explication = "Chromosome dérivé issu du même chromosome"
 
         # f) Toutes les autres anomalies → scoring standard
         else:
             if is_single_chr_deseq(norm, cnt_norm):
                 score = 2
-                explication = "Déséquilibre unichromosomique (2 points)"
+                explication = "Déséquilibre unichromosomique"
             elif is_complex_multichr_deseq(norm):
                 score = 2
-                explication = "Déséquilibre multichromosomique complexe (2 points)"
+                explication = "Déséquilibre multichromosomique complexe"
             elif is_unbalanced_translocation(norm):
                 score = 2
-                explication = "Translocation déséquilibrée (2 points)"
+                explication = "Translocation déséquilibrée"
             else:
                 score = 1
-                explication = "Anomalie standard (1 point)"
+                explication = "Anomalie standard"
 
         total += score
 
@@ -416,12 +485,52 @@ def analyser_formule(formule):
     - Une erreur éventuelle
     """
     try:
-        anomalies, clone_map = parse_caryotype(formule)
-        df_iscn, total_iscn = calcul_score_iscn(anomalies, clone_map)
-        jondroville_scores, total_jondroville = calcul_score_jondroville(anomalies)
+        anomalies, clone_map, entries = parse_caryotype(formule)
+
+        # Déduplication inter-clones: seule la première apparition d'une
+        # anomalie (normalisée) est comptabilisée, les autres clones obtiennent
+        # un score nul avec justification.
+        first_clone_by_norm: dict[str, str] = {}
+        scorable_entries: list[dict[str, str]] = []
+        clone_details_map: dict[str, list[dict[str, str]]] = {}
+
+        for entry in entries:
+            norm = normalize_anomaly(entry["anomaly"])
+            clone = entry["clone"]
+
+            if norm not in first_clone_by_norm:
+                first_clone_by_norm[norm] = clone
+            ref_clone = first_clone_by_norm[norm]
+            is_reference = clone == ref_clone
+
+            details = clone_details_map.setdefault(entry["anomaly"], [])
+            reason = ""
+            if not is_reference:
+                reason = f"Anomalie déjà comptée dans {display_clone_label(ref_clone)}"
+            details.append({
+                "label": display_clone_label(clone),
+                "is_reference": is_reference,
+                "reason": reason,
+            })
+
+            if is_reference:
+                scorable_entries.append(entry)
+
+        scorable_anomalies = [entry["anomaly"] for entry in scorable_entries]
+
+        df_iscn, total_iscn = calcul_score_iscn(scorable_anomalies, clone_map)
+        jondroville_scores, jondroville_explanations, total_jondroville = calcul_score_jondroville(scorable_anomalies)
 
         df_iscn["Score Jondreville 2020"] = df_iscn["Anomalie"].apply(
             lambda anom: total_jondroville if anom == "TOTAL" else jondroville_scores.get(anom, 0)
+        )
+
+        df_iscn["Explication Jondreville 2020"] = df_iscn["Anomalie"].apply(
+            lambda anom: "" if anom == "TOTAL" else jondroville_explanations.get(anom, "Anomalie non constitutionnelle")
+        )
+
+        df_iscn["CloneDetails"] = df_iscn["Anomalie"].apply(
+            lambda anom: [] if anom == "TOTAL" else clone_details_map.get(anom, [])
         )
 
         return df_iscn, {"iscn": total_iscn, "jondroville": total_jondroville}, None

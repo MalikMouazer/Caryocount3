@@ -116,45 +116,152 @@ def format_anomalies_html(anomalies_df):
 
 # Fonction pour un affichage compact similaire à l'analyse par fichier
 def format_anomalies_compact(anomalies_df):
-    """Renvoie un HTML condensé pour la liste des anomalies."""
-    blocks = []
+    """Affiche les anomalies regroupées par clone avec détails."""
+
+    def clean_text(value):
+        if isinstance(value, str) and value.strip():
+            return html.escape(value.strip())
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return '—'
+        return html.escape(str(value))
+
+    def line_color(score):
+        try:
+            value = float(score)
+        except (TypeError, ValueError):
+            value = 0
+        if value >= 1.5:
+            return "#D75C37"
+        if value >= 0.5:
+            return "#3A6EA5"
+        return "#9EA7B8"
+
+    def build_pill_text(label, score, explanation, detail_text):
+        detail = detail_text
+        if explanation != '—':
+            detail = f"{detail_text} ({explanation})"
+        score_value = render_score_value(score)
+        return f"{label} {score_value} : {detail}"
+
+    clone_blocks = {}
+    clone_order = []
+    has_clone_labels = False
+
+    def add_line(clone_label, line_html):
+        key = clone_label or ""
+        if key not in clone_blocks:
+            clone_blocks[key] = []
+            clone_order.append(key)
+        clone_blocks[key].append(line_html)
+
     for _, row in anomalies_df.iterrows():
-        score = row['Score ISCN 2024']
+        score_iscn = row['Score ISCN 2024']
+        score_jon = row['Score Jondreville 2020']
         anomalie = html.escape(str(row['Anomalie']))
+        type_text = clean_text(row.get('Type'))
+        if type_text == '—':
+            type_text = anomalie
 
-        clones_value = row['Clones'] if isinstance(row['Clones'], str) else ""
-        clones_list = [part.strip() for part in clones_value.split(',')] if clones_value else []
-        clones_clean = list(dict.fromkeys([clone for clone in clones_list if clone]))
-        clones = ', '.join(clones_clean) if clones_clean else '—'
+        explication_iscn = clean_text(row.get('Explication'))
+        explication_jon = clean_text(row.get('Explication Jondreville 2020'))
+        clone_details = row.get('CloneDetails')
+        if not isinstance(clone_details, list) or not clone_details:
+            clone_details = [{"label": None, "is_reference": True, "reason": ""}]
 
-        explication_raw = row['Explication']
-        if isinstance(explication_raw, str) and explication_raw.strip():
-            explication = html.escape(explication_raw.strip())
-        elif explication_raw is None or (isinstance(explication_raw, float) and pd.isna(explication_raw)):
-            explication = '—'
+        for detail in clone_details:
+            label = detail.get('label')
+            is_reference = detail.get('is_reference', True)
+            reason_raw = detail.get('reason') or ''
+            reason_html = clean_text(reason_raw) if reason_raw else ''
+
+            if label:
+                has_clone_labels = True
+
+            if is_reference:
+                line_score_iscn = score_iscn
+                line_exp_iscn = explication_iscn
+                line_score_jon = score_jon
+                line_exp_jon = explication_jon
+            else:
+                line_score_iscn = 0
+                line_exp_iscn = reason_html or explication_iscn
+                line_score_jon = 0
+                line_exp_jon = reason_html or explication_jon
+
+            color = line_color(line_score_iscn)
+            line_html = (
+                f'<div class="anomaly-line" style="border-left-color: {color};">'
+                f'<span class="anomaly-label" style="color: {color};">[{anomalie}]</span>'
+                f'<span class="score-pill score-pill-iscn">{build_pill_text("ISCN", line_score_iscn, line_exp_iscn, type_text)}</span>'
+                f'<span class="score-pill score-pill-jon">{build_pill_text("Jon", line_score_jon, line_exp_jon, type_text)}</span>'
+                '</div>'
+            )
+
+            add_line(label, line_html)
+
+    if not clone_blocks:
+        return ""
+
+    blocks = []
+    show_labels = has_clone_labels and len([lbl for lbl in clone_order if lbl]) >= 2
+
+    for label in clone_order:
+        lines_html = "".join(clone_blocks[label])
+        if show_labels and label:
+            blocks.append(
+                '<div class="anomaly-compact">'
+                f'<span class="clone-pill">{html.escape(label)}</span>'
+                f'<div class="clone-group-lines">{lines_html}</div>'
+                '</div>'
+            )
         else:
-            explication = html.escape(str(explication_raw))
-
-        if score == 2:
-            color = "#FF5733"
-            score_text = "2pts"
-        elif score == 1:
-            color = "#33A1FF"
-            score_text = "1pt"
-        else:
-            color = "#AAAAAA"
-            score_text = "0pt"
-
-        blocks.append(
-            f'<div class="anomaly-compact" style="border-left-color: {color};">'
-            f'<span class="anomaly-clone">{html.escape(clones)}</span>'
-            f'<span class="anomaly-label" style="color: {color};">[{anomalie}]</span>'
-            f'<span class="anomaly-score">{score_text}</span>'
-            f'<span class="anomaly-explication">{explication}</span>'
-            '</div>'
-        )
+            blocks.append(f'<div class="anomaly-compact">{lines_html}</div>')
 
     return "\n".join(blocks)
+
+
+def score_tone_class(score):
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return "score-tone-default"
+    if value >= 1.5:
+        return "score-tone-2"
+    if value >= 0.5:
+        return "score-tone-1"
+    return "score-tone-0"
+
+
+def format_score_text(score):
+    if isinstance(score, str):
+        return score
+    if score is None or (isinstance(score, float) and pd.isna(score)):
+        return '—'
+    if isinstance(score, float) and score.is_integer():
+        return str(int(score))
+    return str(score)
+
+
+def render_score_value(score):
+    text = html.escape(format_score_text(score))
+    tone_class = score_tone_class(score)
+    return f"<span class='score-value {tone_class}'>{text}</span>"
+
+
+def render_score_totals(score_iscn, score_jon):
+    """Crée le bloc HTML présentant les scores globaux."""
+    return f"""
+    <div class="score-summary-group">
+        <div class="score-summary">
+            <span class="score-label">ISCN</span>
+            <span class="score-pill score-pill-iscn">{render_score_value(score_iscn)}</span>
+        </div>
+        <div class="score-summary">
+            <span class="score-label">Jondreville</span>
+            <span class="score-pill score-pill-jon">{render_score_value(score_jon)}</span>
+        </div>
+    </div>
+    """
 
 # Interface utilisateur
 st.markdown("""
@@ -182,6 +289,11 @@ with tab1:
                     f"Scores détectés — ISCN: {totals['iscn']} | Jondreville: {totals['jondroville']}"
                 )
 
+                st.markdown(
+                    render_score_totals(totals['iscn'], totals['jondroville']),
+                    unsafe_allow_html=True
+                )
+
                 # Affichage du tableau avec info-bulles
                 st.markdown("### Détail des anomalies")
 
@@ -190,9 +302,6 @@ with tab1:
                 anomalies_html = format_anomalies_compact(anomalies_df)
                 st.markdown(anomalies_html, unsafe_allow_html=True)
 
-                # Affichage du total
-                st.markdown(f"**Score total ISCN: {totals['iscn']}**")
-                st.markdown(f"**Score total Jondreville: {totals['jondroville']}**")
         else:
             st.warning("Veuillez entrer une formule caryotypique.")
 
@@ -247,9 +356,9 @@ with tab2:
                 count_j_col = None
                 for col in df_input.columns:
                     norm = col.strip().lower()
-                    if norm == 'count_i':
+                    if norm in ('count_i', 'count_iscn'):
                         count_i_col = col
-                    elif norm == 'count_j':
+                    elif norm in ('count_j', 'count_jon'):
                         count_j_col = col
 
                 if count_i_col and count_i_col != 'Count_i':
@@ -305,10 +414,45 @@ with tab2:
                         all_anomalies_details.append({"error": False, "df": anomalies_df})
 
                         # Texte simple pour l'export
-                        anomalies_detail = ", ".join([
-                            f"{row_detail['Anomalie']} ({row_detail['Type']}): {row_detail['Score ISCN 2024']} pts"
-                            for _, row_detail in anomalies_df.iterrows()
-                        ])
+                        def clean_detail(value):
+                            if isinstance(value, str) and value.strip():
+                                return value.strip()
+                            if value is None or (isinstance(value, float) and pd.isna(value)):
+                                return "—"
+                            return str(value)
+
+                        detail_chunks = []
+                        for _, row_detail in anomalies_df.iterrows():
+                            type_label = clean_detail(row_detail.get('Type'))
+                            if type_label == '—':
+                                type_label = clean_detail(row_detail.get('Anomalie'))
+                            exp_iscn = clean_detail(row_detail.get('Explication'))
+                            exp_jon = clean_detail(row_detail.get('Explication Jondreville 2020'))
+                            clone_details = row_detail.get('CloneDetails')
+                            if not isinstance(clone_details, list) or not clone_details:
+                                clone_details = [{"label": None, "is_reference": True, "reason": ""}]
+
+                            multiple_clones = len([cd for cd in clone_details if cd.get('label')]) >= 2
+
+                            for detail in clone_details:
+                                is_reference = detail.get('is_reference', True)
+                                reason = clean_detail(detail.get('reason')) if detail.get('reason') else ''
+                                clone_label = detail.get('label') if multiple_clones else ''
+
+                                line_score_iscn = row_detail['Score ISCN 2024'] if is_reference else 0
+                                line_exp_iscn = exp_iscn if is_reference else (reason or exp_iscn)
+                                line_score_jon = row_detail['Score Jondreville 2020'] if is_reference else 0
+                                line_exp_jon = exp_jon if is_reference else (reason or exp_jon)
+
+                                prefix = f"{clone_label}: " if clone_label else ""
+                                chunk = (
+                                    f"{prefix}{type_label}: ISCN {line_score_iscn}"
+                                    f" ({line_exp_iscn}) | Jon {line_score_jon}"
+                                    f" ({line_exp_jon})"
+                                )
+                                detail_chunks.append(chunk)
+
+                        anomalies_detail = ", ".join(detail_chunks)
 
                         comptage_iscn = totals['iscn']
                         comptage_jondroville = totals['jondroville']
@@ -379,15 +523,19 @@ with tab2:
 
                     for label in display_labels:
                         if label == "Comptage ISCN":
-                            text = format_display(row_data.get(label))
+                            raw_value = row_data.get(label)
+                            icon = ""
                             if matches["iscn"] is not None:
-                                text = f"{text} {'✅' if matches['iscn'] else '❌'}"
-                            cells.append(f"<td>{html.escape(text)}</td>")
+                                icon = f"<span class='pill-icon'>{'✅' if matches['iscn'] else '❌'}</span>"
+                            badge = f"<span class='score-pill score-pill-iscn'>{render_score_value(raw_value)}{icon}</span>"
+                            cells.append(f"<td class='score-cell'>{badge}</td>")
                         elif label == "Comptage Jon":
-                            text = format_display(row_data.get(label))
+                            raw_value = row_data.get(label)
+                            icon = ""
                             if matches["jon"] is not None:
-                                text = f"{text} {'✅' if matches['jon'] else '❌'}"
-                            cells.append(f"<td>{html.escape(text)}</td>")
+                                icon = f"<span class='pill-icon'>{'✅' if matches['jon'] else '❌'}</span>"
+                            badge = f"<span class='score-pill score-pill-jon'>{render_score_value(raw_value)}{icon}</span>"
+                            cells.append(f"<td class='score-cell'>{badge}</td>")
                         elif label == "Anomalies détectées":
                             if anomalies["error"]:
                                 message = html.escape(anomalies["message"])
@@ -418,26 +566,48 @@ with tab2:
 
                 st.markdown(table_html, unsafe_allow_html=True)
 
-                # Statistiques de correspondance
-                if has_count_i or has_count_j:
-                    if has_count_i:
-                        total_i = sum(1 for m in match_details if m["iscn"] is not None)
-                        match_i = sum(1 for m in match_details if m["iscn"])
-                        if total_i:
-                            st.success(
-                                f"Correspondance ISCN: {match_i}/{total_i} ({int(match_i/total_i*100)}%)"
-                            )
-                    if has_count_j:
-                        total_j = sum(1 for m in match_details if m["jon"] is not None)
-                        match_j = sum(1 for m in match_details if m["jon"])
-                        if total_j:
-                            st.success(
-                                f"Correspondance Jondreville: {match_j}/{total_j} ({int(match_j/total_j*100)}%)"
-                            )
+                # Statistiques de correspondance + export sur une seule ligne
+                columns = st.columns(3)
+                renderers = []
 
-                # Option d'export Excel
-                st.subheader("Exporter les résultats")
-                st.markdown(get_excel_download_link(results_df), unsafe_allow_html=True)
+                if has_count_i:
+                    total_i = sum(1 for m in match_details if m["iscn"] is not None)
+                    match_i = sum(1 for m in match_details if m["iscn"])
+                    if total_i:
+                        msg_i = f"Correspondance ISCN: {match_i}/{total_i} ({int(match_i/total_i*100)}%)"
+
+                        def render_iscn(col, message=msg_i):
+                            col.success(message)
+
+                        renderers.append(render_iscn)
+
+                if has_count_j:
+                    total_j = sum(1 for m in match_details if m["jon"] is not None)
+                    match_j = sum(1 for m in match_details if m["jon"])
+                    if total_j:
+                        msg_j = f"Correspondance Jondreville: {match_j}/{total_j} ({int(match_j/total_j*100)}%)"
+
+                        def render_jon(col, message=msg_j):
+                            col.success(message)
+
+                        renderers.append(render_jon)
+
+                download_html = get_excel_download_link(results_df)
+                download_html = download_html.replace(
+                    'class="download-button">',
+                    'class="download-button"><span class="icon">⬇️</span>'
+                )
+
+                def render_download(col, html=download_html):
+                    col.markdown(html, unsafe_allow_html=True)
+
+                renderers.append(render_download)
+
+                for idx, render in enumerate(renderers[:3]):
+                    render(columns[idx])
+
+                for idx in range(len(renderers), 3):
+                    columns[idx].markdown("&nbsp;", unsafe_allow_html=True)
                 
         except Exception as e:
             st.error(f"Erreur lors de l'analyse du fichier: {str(e)}")
@@ -446,19 +616,70 @@ with tab2:
 st.markdown("""
 <style>
     .download-button {
-        display: inline-block;
-        padding: 10px 20px;
-        background-color: #4CAF50;
-        color: white;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 28px;
+        background-color: #111827;
+        color: #ffffff;
         text-decoration: none;
-        border-radius: 4px;
+        border-radius: 999px;
         margin-top: 10px;
-        font-weight: bold;
+        font-weight: 600;
         text-align: center;
+        transition: background-color 0.2s ease, transform 0.2s ease;
     }
     
     .download-button:hover {
-        background-color: #45a049;
+        background-color: #000000;
+        transform: translateY(-1px);
+    }
+
+    .download-button .icon {
+        font-size: 1.1rem;
+    }
+
+    .score-summary-group {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin: 10px 0 20px;
+    }
+
+    .score-summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background-color: #f4f5f7;
+        border-radius: 999px;
+        padding: 6px 12px;
+    }
+
+    .score-label {
+        font-weight: 600;
+        color: #1f2937;
+    }
+
+    .score-pill {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 2px 10px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        gap: 4px;
+        background-color: transparent;
+        border: 1px solid currentColor;
+    }
+
+    .score-pill-iscn {
+        border-color: #3a6ea5;
+        color: #1f2937;
+    }
+
+    .score-pill-jon {
+        border-color: #8a5a9e;
+        color: #1f2937;
     }
 
     h3 {
@@ -481,7 +702,7 @@ st.markdown("""
     .results-table {
         width: 100%;
         border-collapse: collapse;
-        table-layout: fixed;
+        table-layout: auto;
     }
 
     .results-table th,
@@ -529,37 +750,93 @@ st.markdown("""
 
     .anomaly-compact {
         display: flex;
-        flex-wrap: wrap;
-        align-items: center;
+        flex-direction: column;
+        align-items: flex-start;
         gap: 6px;
-        margin: 2px 0;
-        padding: 4px 8px;
+        margin: 4px 0;
+        padding: 8px 10px;
         background-color: #f9f9f9;
-        border-left: 3px solid transparent;
-        border-radius: 4px;
+        border-radius: 6px;
         font-size: 14px;
         line-height: 1.4;
     }
 
-    .anomaly-compact .anomaly-clone {
+    .clone-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+    }
+
+    .clone-group-lines {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+    }
+
+    .anomaly-line {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        background-color: #ffffff;
+        border-radius: 4px;
+        padding: 6px 8px;
+        border-left: 3px solid transparent;
+    }
+
+    .clone-pill {
+        background-color: #111827;
+        color: #ffffff;
+        border-radius: 999px;
+        padding: 2px 12px;
+        font-size: 12px;
         font-weight: 600;
+        align-self: flex-start;
     }
 
     .anomaly-compact .anomaly-label {
         font-weight: 600;
     }
 
-    .anomaly-compact .anomaly-score {
-        background-color: #555;
-        color: #fff;
-        border-radius: 999px;
-        padding: 1px 6px;
+    .anomaly-compact .score-pill {
         font-size: 12px;
-        font-weight: 600;
+        padding: 2px 8px;
     }
 
-    .anomaly-compact .anomaly-explication {
-        color: #666;
+    .pill-icon {
+        font-size: 0.85em;
+        margin-left: 4px;
+    }
+
+    .score-value {
+        font-weight: 700;
+    }
+
+    .score-tone-2 {
+        color: #D75C37;
+    }
+
+    .score-tone-1 {
+        color: #3A6EA5;
+    }
+
+    .score-tone-0 {
+        color: #9EA7B8;
+    }
+
+    .score-tone-default {
+        color: #1f2937;
+    }
+
+    .score-cell {
+        white-space: nowrap;
+    }
+
+    .score-cell .score-pill {
+        font-size: 0.85rem;
     }
 
     /* Style pour les lignes du tableau */

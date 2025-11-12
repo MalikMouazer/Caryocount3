@@ -295,16 +295,24 @@ def detect_implicit_anomalies(anomalies):
                     implicit[d] = {"reason": "Dérivé implicite", "ref": ref}
 
     # 2) Gains/pertes simples issus d'un dérivé multi-chromosomique
+    def extract_chr_ids(sequence: str) -> set[str]:
+        ids = set()
+        for part in sequence.split(';'):
+            clean = re.sub(r"\D", "", part)
+            if clean:
+                ids.add(clean)
+        return ids
+
     multi_der = {}
     for an in norm_counts:
         if an.startswith(('der', 'dic')):
-            m = re.match(r"^(?:der|dic)\(([0-9;]+)\)", an)
+            m = re.match(r"^(?:der|dic)\(([0-9?;]+)\)", an)
             if m:
                 # Chromosomes juste apres der(...)
-                chrs = set(m.group(1).split(';'))
+                chrs = extract_chr_ids(m.group(1))
                 # Ajouter egalement les partenaires de la/les translocations t(...)
-                for t in re.finditer(r"t\(([0-9;]+)\)", an):
-                    chrs.update(t.group(1).split(';'))
+                for t in re.finditer(r"t\(([0-9?;]+)\)", an):
+                    chrs.update(extract_chr_ids(t.group(1)))
                 if len(chrs) > 1:
                     for c in chrs:
                         multi_der.setdefault(c, []).append(an)

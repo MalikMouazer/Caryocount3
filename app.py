@@ -118,6 +118,16 @@ def format_anomalies_html(anomalies_df):
 def format_anomalies_compact(anomalies_df):
     """Affiche les anomalies regroupées par clone avec détails."""
 
+    clone_blocks = {}
+    clone_order = []
+
+    def add_line(clone_label, line_html):
+        key = clone_label or ""
+        if key not in clone_blocks:
+            clone_blocks[key] = []
+            clone_order.append(key)
+        clone_blocks[key].append(line_html)
+
     def clean_text(value):
         if isinstance(value, str) and value.strip():
             return html.escape(value.strip())
@@ -143,17 +153,6 @@ def format_anomalies_compact(anomalies_df):
         score_value = render_score_value(score)
         return f"{label} {score_value} : {detail}"
 
-    clone_blocks = {}
-    clone_order = []
-    has_clone_labels = False
-
-    def add_line(clone_label, line_html):
-        key = clone_label or ""
-        if key not in clone_blocks:
-            clone_blocks[key] = []
-            clone_order.append(key)
-        clone_blocks[key].append(line_html)
-
     for _, row in anomalies_df.iterrows():
         score_iscn = row['Score ISCN 2024']
         score_jon = row['Score Jondreville 2020']
@@ -166,16 +165,14 @@ def format_anomalies_compact(anomalies_df):
         explication_jon = clean_text(row.get('Explication Jondreville 2020'))
         clone_details = row.get('CloneDetails')
         if not isinstance(clone_details, list) or not clone_details:
-            clone_details = [{"label": None, "is_reference": True, "reason": ""}]
+            clone_details = [{"label": None, "is_reference": True, "reason": "", "count": 1}]
 
         for detail in clone_details:
             label = detail.get('label')
             is_reference = detail.get('is_reference', True)
             reason_raw = detail.get('reason') or ''
             reason_html = clean_text(reason_raw) if reason_raw else ''
-
-            if label:
-                has_clone_labels = True
+            count = detail.get('count', 1)
 
             if is_reference:
                 line_score_iscn = score_iscn
@@ -189,9 +186,12 @@ def format_anomalies_compact(anomalies_df):
                 line_exp_jon = reason_html or explication_jon
 
             color = line_color(line_score_iscn)
+            anomaly_label = f"[{anomalie}]"
+            if count > 1:
+                anomaly_label += f" &times;{count}"
             line_html = (
                 f'<div class="anomaly-line" style="border-left-color: {color};">'
-                f'<span class="anomaly-label" style="color: {color};">[{anomalie}]</span>'
+                f'<span class="anomaly-label" style="color: {color};">{anomaly_label}</span>'
                 f'<span class="score-pill score-pill-iscn">{build_pill_text("ISCN", line_score_iscn, line_exp_iscn, type_text)}</span>'
                 f'<span class="score-pill score-pill-jon">{build_pill_text("Jon", line_score_jon, line_exp_jon, type_text)}</span>'
                 '</div>'
@@ -202,9 +202,10 @@ def format_anomalies_compact(anomalies_df):
     if not clone_blocks:
         return ""
 
-    blocks = []
-    show_labels = has_clone_labels and len([lbl for lbl in clone_order if lbl]) >= 2
+    labeled_keys = [lbl for lbl in clone_order if lbl]
+    show_labels = len(labeled_keys) >= 2
 
+    blocks = []
     for label in clone_order:
         lines_html = "".join(clone_blocks[label])
         if show_labels and label:
@@ -248,17 +249,22 @@ def render_score_value(score):
     return f"<span class='score-value {tone_class}'>{text}</span>"
 
 
+def render_plain_score(score):
+    text = html.escape(format_score_text(score))
+    return f"<span class='score-value score-tone-default'>{text}</span>"
+
+
 def render_score_totals(score_iscn, score_jon):
     """Crée le bloc HTML présentant les scores globaux."""
     return f"""
     <div class="score-summary-group">
         <div class="score-summary">
             <span class="score-label">ISCN</span>
-            <span class="score-pill score-pill-iscn">{render_score_value(score_iscn)}</span>
+            <span class="score-pill score-pill-iscn">{render_plain_score(score_iscn)}</span>
         </div>
         <div class="score-summary">
             <span class="score-label">Jondreville</span>
-            <span class="score-pill score-pill-jon">{render_score_value(score_jon)}</span>
+            <span class="score-pill score-pill-jon">{render_plain_score(score_jon)}</span>
         </div>
     </div>
     """
@@ -430,7 +436,7 @@ with tab2:
                             exp_jon = clean_detail(row_detail.get('Explication Jondreville 2020'))
                             clone_details = row_detail.get('CloneDetails')
                             if not isinstance(clone_details, list) or not clone_details:
-                                clone_details = [{"label": None, "is_reference": True, "reason": ""}]
+                                clone_details = [{"label": None, "is_reference": True, "reason": "", "count": 1}]
 
                             multiple_clones = len([cd for cd in clone_details if cd.get('label')]) >= 2
 
@@ -438,6 +444,7 @@ with tab2:
                                 is_reference = detail.get('is_reference', True)
                                 reason = clean_detail(detail.get('reason')) if detail.get('reason') else ''
                                 clone_label = detail.get('label') if multiple_clones else ''
+                                count = detail.get('count', 1)
 
                                 line_score_iscn = row_detail['Score ISCN 2024'] if is_reference else 0
                                 line_exp_iscn = exp_iscn if is_reference else (reason or exp_iscn)
@@ -445,8 +452,9 @@ with tab2:
                                 line_exp_jon = exp_jon if is_reference else (reason or exp_jon)
 
                                 prefix = f"{clone_label}: " if clone_label else ""
+                                label_with_count = f"{type_label} x{count}" if count > 1 else type_label
                                 chunk = (
-                                    f"{prefix}{type_label}: ISCN {line_score_iscn}"
+                                    f"{prefix}{label_with_count}: ISCN {line_score_iscn}"
                                     f" ({line_exp_iscn}) | Jon {line_score_jon}"
                                     f" ({line_exp_jon})"
                                 )
@@ -527,14 +535,14 @@ with tab2:
                             icon = ""
                             if matches["iscn"] is not None:
                                 icon = f"<span class='pill-icon'>{'✅' if matches['iscn'] else '❌'}</span>"
-                            badge = f"<span class='score-pill score-pill-iscn'>{render_score_value(raw_value)}{icon}</span>"
+                            badge = f"<span class='score-pill score-pill-iscn'>{render_plain_score(raw_value)}{icon}</span>"
                             cells.append(f"<td class='score-cell'>{badge}</td>")
                         elif label == "Comptage Jon":
                             raw_value = row_data.get(label)
                             icon = ""
                             if matches["jon"] is not None:
                                 icon = f"<span class='pill-icon'>{'✅' if matches['jon'] else '❌'}</span>"
-                            badge = f"<span class='score-pill score-pill-jon'>{render_score_value(raw_value)}{icon}</span>"
+                            badge = f"<span class='score-pill score-pill-jon'>{render_plain_score(raw_value)}{icon}</span>"
                             cells.append(f"<td class='score-cell'>{badge}</td>")
                         elif label == "Anomalies détectées":
                             if anomalies["error"]:

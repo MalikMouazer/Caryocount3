@@ -351,21 +351,22 @@ def calcul_score_jondroville(anomalies):
     scores = {}
     explanations = {}
 
-    for anom in counts:
+    for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
         # Ignorer les anomalies constitutionnelles (+Nc)
         if re.match(r"^\+\d+c$", norm):
-            score = 0
+            score_per_occurrence = 0
             explanation = "Anomalie constitutionnelle"
         elif is_repeat_notation(norm):
-            score = 0
+            score_per_occurrence = 0
             explanation = "Anomalies déjà connues dans un autre clone"
         elif norm.lower() == 'triploidy':
-            score = 0
+            score_per_occurrence = 0
             explanation = "Triploïdie ignorée dans le calcul"
         else:
-            score = 1  # Chaque anomalie non-constitutionnelle vaut 1 point
+            score_per_occurrence = 1  # Chaque anomalie non-constitutionnelle vaut 1 point
             explanation = "Anomalie non constitutionnelle"
+        score = score_per_occurrence * cnt
         scores[anom] = score
         explanations[anom] = explanation
         total += score
@@ -492,7 +493,7 @@ def analyser_formule(formule):
         # un score nul avec justification.
         first_clone_by_norm: dict[str, str] = {}
         scorable_entries: list[dict[str, str]] = []
-        clone_details_map: dict[str, list[dict[str, str]]] = {}
+        clone_details_map: dict[str, dict[str, dict[str, object]]] = {}
 
         for entry in entries:
             norm = normalize_anomaly(entry["anomaly"])
@@ -503,15 +504,19 @@ def analyser_formule(formule):
             ref_clone = first_clone_by_norm[norm]
             is_reference = clone == ref_clone
 
-            details = clone_details_map.setdefault(entry["anomaly"], [])
-            reason = ""
-            if not is_reference:
-                reason = f"Anomalie déjà comptée dans {display_clone_label(ref_clone)}"
-            details.append({
+            clone_bucket = clone_details_map.setdefault(entry["anomaly"], {})
+            bucket_entry = clone_bucket.setdefault(clone, {
                 "label": display_clone_label(clone),
                 "is_reference": is_reference,
-                "reason": reason,
+                "reason": "",
+                "count": 0,
             })
+
+            bucket_entry["count"] = bucket_entry.get("count", 0) + 1
+
+            if not is_reference:
+                bucket_entry["is_reference"] = False
+                bucket_entry["reason"] = f"Anomalie déjà comptée dans {display_clone_label(ref_clone)}"
 
             if is_reference:
                 scorable_entries.append(entry)
@@ -529,8 +534,12 @@ def analyser_formule(formule):
             lambda anom: "" if anom == "TOTAL" else jondroville_explanations.get(anom, "Anomalie non constitutionnelle")
         )
 
+        clone_details_ready = {
+            anom: list(clone_dict.values()) for anom, clone_dict in clone_details_map.items()
+        }
+
         df_iscn["CloneDetails"] = df_iscn["Anomalie"].apply(
-            lambda anom: [] if anom == "TOTAL" else clone_details_map.get(anom, [])
+            lambda anom: [] if anom == "TOTAL" else clone_details_ready.get(anom, [])
         )
 
         return df_iscn, {"iscn": total_iscn, "jondroville": total_jondroville}, None

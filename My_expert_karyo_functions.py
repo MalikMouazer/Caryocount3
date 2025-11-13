@@ -439,7 +439,7 @@ def calcul_score_iscn(anomalies, clone_map):
                 explication = "Translocation déséquilibrée"
             else:
                 score = 1
-                explication = "RAS"
+                explication = "-"
 
         # d) Chromosomes dicentriques → 2 points
         elif norm.startswith('dic'):

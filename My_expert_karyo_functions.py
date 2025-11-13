@@ -387,7 +387,7 @@ def calcul_score_jondroville(anomalies):
             explanation = "Triploïdie ignorée dans le calcul"
         else:
             score_per_occurrence = 1  # Chaque anomalie non-constitutionnelle vaut 1 point
-            explanation = "RAS"
+            explanation = "-"
         score = score_per_occurrence * cnt
         scores[anom] = score
         explanations[anom] = explanation
@@ -475,7 +475,7 @@ def calcul_score_iscn(anomalies, clone_map):
                 explication = "Translocation déséquilibrée"
             else:
                 score = 1
-                explication = "RAS"
+                explication = "-"
 
         total += score
 

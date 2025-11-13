@@ -697,7 +697,7 @@ st.markdown("""
     }
 
     .results-table-container {
-        max-height: 500px;
+        max-height: 900px;
         overflow-y: auto;
         overflow-x: auto;
         border: 1px solid #e5e7eb;

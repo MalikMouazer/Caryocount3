@@ -262,6 +262,19 @@ def normalize_anomaly(anom: str) -> str:
     return norm
 
 
+def constitutional_status(norm: str) -> tuple[bool, str]:
+    """Indique si ``norm`` correspond à une anomalie constitutionnelle."""
+
+    cleaned = norm.strip().lower()
+    if re.match(r"^\+\d+c$", cleaned):
+        return True, "Gain constitutionnel"
+    if cleaned.endswith("?c"):
+        return True, "Suspicion d'anomalie constitutionnelle (?c)"
+    if cleaned.endswith('c'):
+        return True, "Anomalie constitutionnelle"
+    return False, ""
+
+
 def detect_implicit_anomalies(anomalies):
     """Détecte les anomalies implicites et renvoie un dict.
 
@@ -362,9 +375,10 @@ def calcul_score_jondroville(anomalies):
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
         # Ignorer les anomalies constitutionnelles (+Nc)
-        if re.match(r"^\+\d+c$", norm):
+        is_constitutional, const_expl = constitutional_status(norm)
+        if is_constitutional:
             score_per_occurrence = 0
-            explanation = "Anomalie constitutionnelle"
+            explanation = const_expl
         elif is_repeat_notation(norm):
             score_per_occurrence = 0
             explanation = "Anomalies déjà connues dans un autre clone"
@@ -373,7 +387,7 @@ def calcul_score_jondroville(anomalies):
             explanation = "Triploïdie ignorée dans le calcul"
         else:
             score_per_occurrence = 1  # Chaque anomalie non-constitutionnelle vaut 1 point
-            explanation = "Anomalie non constitutionnelle"
+            explanation = "Anomalie sans règle spécifique"
         score = score_per_occurrence * cnt
         scores[anom] = score
         explanations[anom] = explanation
@@ -397,9 +411,10 @@ def calcul_score_iscn(anomalies, clone_map):
         cnt_norm = norm_counts[norm]
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
-        if re.match(r"^\+\d+c$", norm):
+        is_constitutional, const_expl = constitutional_status(norm)
+        if is_constitutional:
             score = 0
-            explication = "Anomalie constitutionnelle"
+            explication = const_expl
 
         elif is_repeat_notation(norm):
             score = 0

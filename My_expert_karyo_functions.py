@@ -387,7 +387,7 @@ def calcul_score_jondroville(anomalies):
             explanation = "Triploïdie ignorée dans le calcul"
         else:
             score_per_occurrence = 1  # Chaque anomalie non-constitutionnelle vaut 1 point
-            explanation = "Anomalie sans règle spécifique"
+            explanation = "RAS"
         score = score_per_occurrence * cnt
         scores[anom] = score
         explanations[anom] = explanation
@@ -439,7 +439,7 @@ def calcul_score_iscn(anomalies, clone_map):
                 explication = "Translocation déséquilibrée"
             else:
                 score = 1
-                explication = "Anomalie standard"
+                explication = "RAS"
 
         # d) Chromosomes dicentriques → 2 points
         elif norm.startswith('dic'):
@@ -475,7 +475,7 @@ def calcul_score_iscn(anomalies, clone_map):
                 explication = "Translocation déséquilibrée"
             else:
                 score = 1
-                explication = "Anomalie standard"
+                explication = "RAS"
 
         total += score
 

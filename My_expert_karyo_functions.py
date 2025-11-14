@@ -35,6 +35,12 @@ def get_chromosomes(anom):
 
     return nums
 
+
+def count_known_chromosomes(chroms: set[str]) -> int:
+    """Compte uniquement les chromosomes identifiés (sans '?')."""
+
+    return sum(1 for c in chroms if c != '?')
+
 # Parsing de la formule karyotypique
 def parse_caryotype(chaine_iscn):
     """Parse une chaîne ISCN et renvoie les anomalies par clone.
@@ -132,8 +138,23 @@ def is_balanced_translocation(anom):
     Détecte les translocations équilibrées:
     t(NUM;NUM[;...])(p;q) sans der,+,-
     """
-    pattern = r'^t\(\d+(?:;\d+)+\)\(.+\)$'
-    return bool(re.match(pattern, anom)) and 'der' not in anom and '+' not in anom and '-' not in anom
+    pattern = r'^t\(\??\d+(?:;\??\d+)+\)\(.+\)$'
+    if 'der' in anom or '+' in anom:
+        return False
+
+    match = re.match(pattern, anom)
+    if not match:
+        return False
+
+    # Retirer la partie décrivant les points de cassure pour ignorer
+    # les tirets utilisés dans les plages (ex: q12-13)
+    breakpoint_start = anom.rfind('(')
+    non_breakpoint_part = anom[:breakpoint_start] if breakpoint_start != -1 else anom
+
+    if '-' in non_breakpoint_part:
+        return False
+
+    return True
 
 def is_unbalanced_translocation(anom):
     """
@@ -154,7 +175,7 @@ def is_balanced_insertion(anom):
     Détecte les insertions équilibrées:
     ins(NUM;NUM[;...])(p;q1q2) sans der,+,-
     """
-    pattern = r'^ins\(\d+(?:;\d+)+\)\(.+\)$'
+    pattern = r'^ins\(\??\d+(?:;\??\d+)+\)\(.+\)$'
     return bool(re.match(pattern, anom)) and 'der' not in anom and '+' not in anom and '-' not in anom
 
 # Détection des anomalies multichromosomiques déséquilibrées pour 2 points
@@ -171,12 +192,14 @@ def is_complex_multichr_deseq(anom):
         if anom.count('(') == 1:
             return True
         chroms = get_chromosomes(anom)
-        # s'il n'y a qu'un seul chromosome cité malgré les détails -> 1 point
-        return len(chroms) >= 2
+        known = count_known_chromosomes(chroms)
+        # s'il n'y a pas au moins deux chromosomes identifiés -> pas complexe
+        return known >= 2
 
     chroms = get_chromosomes(anom)
-    # si un seul chromosome impliqué -> pas multi-chromosomique déséquilibrée
-    if len(chroms) <= 1:
+    known = count_known_chromosomes(chroms)
+    # si un seul chromosome identifié -> pas multi-chromosomique déséquilibrée
+    if known <= 1:
         return False
     # chromosome dicentrique ou anneau -> complexe multi-chromosomique
     if anom.startswith('dic') or anom.startswith('r('):
@@ -275,6 +298,18 @@ def constitutional_status(norm: str) -> tuple[bool, str]:
     return False, ""
 
 
+def append_uncertainty_note(anom: str, explanation: str) -> str:
+    """Ajoute une mention d'imprécision si la notation contient un '?'."""
+
+    if '?' not in anom:
+        return explanation
+
+    note = "Positions incertaines ('?')"
+    if explanation:
+        return f"{explanation} — {note}"
+    return note
+
+
 def detect_implicit_anomalies(anomalies):
     """Détecte les anomalies implicites et renvoie un dict.
 
@@ -284,10 +319,12 @@ def detect_implicit_anomalies(anomalies):
     """
     norm_counts = Counter(normalize_anomaly(a) for a in anomalies)
     # mappage normalisé -> version originale pour l'affichage
-    norm_to_orig = {}
-    for a in anomalies:
+    norm_to_orig: dict[str, str] = {}
+    first_index: dict[str, int] = {}
+    for idx, a in enumerate(anomalies):
         norm = normalize_anomaly(a)
         norm_to_orig.setdefault(norm, a)
+        first_index.setdefault(norm, idx)
 
     implicit = {}
 
@@ -316,7 +353,7 @@ def detect_implicit_anomalies(anomalies):
                 ids.add(clean)
         return ids
 
-    multi_der = {}
+    multi_der: dict[str, list[dict[str, object]]] = {}
     for an in norm_counts:
         if an.startswith(('der', 'dic')):
             m = re.match(r"^(?:der|dic)\(([0-9?;]+)\)", an)
@@ -327,16 +364,39 @@ def detect_implicit_anomalies(anomalies):
                 for t in re.finditer(r"t\(([0-9?;]+)\)", an):
                     chrs.update(extract_chr_ids(t.group(1)))
                 if len(chrs) > 1:
+                    centromeric = bool(re.search(r'[pq]10', an))
+                    index = first_index.get(an, float('inf'))
                     for c in chrs:
-                        multi_der.setdefault(c, []).append(an)
+                        multi_der.setdefault(c, []).append({
+                            "anom": an,
+                            "index": index,
+                            "centromeric": centromeric,
+                        })
 
     for an in norm_counts:
         if an.startswith(('+', '-')):
             num = re.sub(r"\D", "", an)
-            if num in multi_der:
-                ref_norm = multi_der[num][0]
-                ref = norm_to_orig.get(ref_norm, ref_norm)
-                implicit[an] = {"reason": "Gain/perte implicite", "ref": ref}
+            if not num or num not in multi_der:
+                continue
+            entries = sorted(
+                multi_der[num],
+                key=lambda e: e["index"],  # type: ignore[index]
+            )
+            if an.startswith('-'):
+                ref_entry = entries[0]
+                reason = "Perte implicite"
+            else:
+                ref_entry = next(
+                    (e for e in entries if e.get("centromeric")),  # type: ignore[arg-type]
+                    None,
+                )
+                if not ref_entry:
+                    continue
+                reason = "Gain implicite (points de cassure p10/q10)"
+
+            ref_norm = ref_entry["anom"]  # type: ignore[index]
+            ref = norm_to_orig.get(ref_norm, ref_norm)
+            implicit[an] = {"reason": reason, "ref": ref}
 
     # 3) Répétitions de la même anomalie (même chromosome)
     base_pattern = re.compile(
@@ -350,6 +410,11 @@ def detect_implicit_anomalies(anomalies):
         # être considérés comme des duplications implicites
         if norm.startswith(('+', '-')):
             continue
+        # Les dérivés sont traités séparément via la comparaison des
+        # ensembles chromosomiques. Ne pas les inclure ici pour éviter
+        # de marquer implicites des dérivés distincts.
+        if norm.startswith(('der', 'dic')):
+            continue
         m = base_pattern.match(norm)
         base = m.group(0) if m else norm
         base_map.setdefault(base, []).append(norm)
@@ -360,6 +425,23 @@ def detect_implicit_anomalies(anomalies):
             for n in norms[1:]:
                 if n not in implicit:
                     implicit[n] = {"reason": "Duplication avec l'anomalie de référence", "ref": ref}
+
+    # 4) Dérivés distincts impliquant le même ensemble de chromosomes
+    derived_groups = {}
+    for an in norm_counts:
+        if an.startswith(('der', 'dic')):
+            chroms = tuple(sorted(get_chromosomes(an)))
+            if chroms:
+                derived_groups.setdefault(chroms, []).append(an)
+
+    for ders in derived_groups.values():
+        if len(ders) <= 1:
+            continue
+        ders_sorted = sorted(ders, key=lambda d: first_index.get(d, float('inf')))
+        ref_norm = ders_sorted[0]
+        ref = norm_to_orig.get(ref_norm, ref_norm)
+        for n in ders_sorted[1:]:
+            implicit.setdefault(n, {"reason": "Dérivé implicite (mêmes chromosomes)", "ref": ref})
 
     return implicit
 
@@ -387,7 +469,8 @@ def calcul_score_jondroville(anomalies):
             explanation = "Triploïdie ignorée dans le calcul"
         else:
             score_per_occurrence = 1  # Chaque anomalie non-constitutionnelle vaut 1 point
-            explanation = "-"
+            explanation = "Anomalie non constitutionnelle"
+        explanation = append_uncertainty_note(anom, explanation)
         score = score_per_occurrence * cnt
         scores[anom] = score
         explanations[anom] = explanation
@@ -449,15 +532,20 @@ def calcul_score_iscn(anomalies, clone_map):
         # e) Chromosomes dérivés
         elif norm.startswith('der'):
             chroms = get_chromosomes(norm)
+            known = count_known_chromosomes(chroms)
+            has_unknown = '?' in chroms
             if norm.count('(') == 1:
                 score = 2
                 explication = "Chromosome dérivé non détaillé"
-            elif len(chroms) >= 2:
+            elif known >= 2:
                 score = 2
-                if '?' in norm:
+                if has_unknown and '?' in norm:
                     explication = "Chromosome dérivé impliquant plusieurs chromosomes avec des imprécisions"
                 else:
                     explication = "Chromosome dérivé impliquant plusieurs chromosomes"
+            elif has_unknown:
+                score = 1
+                explication = "Chromosome dérivé sans certitude sur un second chromosome"
             else:
                 score = 1
                 explication = "Chromosome dérivé issu du même chromosome"
@@ -478,6 +566,7 @@ def calcul_score_iscn(anomalies, clone_map):
                 explication = "-"
 
         total += score
+        explication = append_uncertainty_note(anom, explication)
 
         rows.append({
             "Anomalie": anom,

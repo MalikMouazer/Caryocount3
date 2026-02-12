@@ -321,7 +321,8 @@ with tab2:
         )
  
 
-    df_input = None
+    # Préserver les données chargées entre les reruns (ex: clic sur "Trier")
+    df_input = st.session_state.get("df_input")
     if test_button:
         TEST_SHEET_URL = (
             "https://docs.google.com/spreadsheets/d/"
@@ -331,12 +332,15 @@ with tab2:
         if err:
             st.error(f"Erreur lors du chargement du fichier de tests : {err}")
             st.stop()
+        else:
+            st.session_state["df_input"] = df_input
     elif uploaded_file is not None:
         # Déterminer le type de fichier
         if uploaded_file.name.endswith('.csv'):
             df_input = pd.read_csv(uploaded_file)
         else:  # Excel
             df_input = pd.read_excel(uploaded_file)
+        st.session_state["df_input"] = df_input
 
 
 
@@ -517,16 +521,47 @@ with tab2:
                 display_labels.append("Anomalies détectées")
 
                 # Affichage des résultats
-                st.markdown("### Résultats de l'analyse")
+                title_col, sort_col = st.columns([1, 0.2])
+                title_col.markdown("### Résultats de l'analyse")
+
+                # Option de tri par discordance, uniquement si au moins une référence est présente
+                sort_enabled = False
+                if has_count_i or has_count_j:
+                    sort_enabled = sort_col.checkbox(
+                        "Trier",
+                        value=False,
+                        help="Affiche d'abord les lignes discordantes (ISCN ou Jon), dans l'ordre des lignes d'origine."
+                    )
+
+                # Longueurs de sécurité pour éviter toute désynchronisation
+                base_len = min(len(results_df), len(match_details), len(all_anomalies_details))
+                display_order = list(range(base_len))
+                if sort_enabled:
+                    if base_len < len(results_df) or base_len < len(match_details):
+                        st.warning("Tri non appliqué: longueurs incohérentes des données d'affichage.")
+                    else:
+                        try:
+                            def sort_key(idx: int):
+                                ligne_val = results_df.at[idx, "Ligne"] if "Ligne" in results_df else idx
+                                is_discordant = (
+                                    match_details[idx].get("iscn") is False
+                                    or match_details[idx].get("jon") is False
+                                )
+                                return (0 if is_discordant else 1, ligne_val)
+
+                            display_order = sorted(display_order, key=sort_key)
+                        except Exception as sort_err:
+                            st.warning(f"Tri non appliqué (erreur: {sort_err})")
 
                 header_html = "".join(
                     f"<th>{html.escape(label)}</th>" for label in display_labels
                 )
 
                 body_rows = []
-                for i, (_, row_data) in enumerate(results_df.iterrows()):
-                    anomalies = all_anomalies_details[i]
-                    matches = match_details[i]
+                for idx in display_order:
+                    row_data = results_df.iloc[idx]
+                    anomalies = all_anomalies_details[idx]
+                    matches = match_details[idx] if idx < len(match_details) else {"iscn": None, "jon": None}
                     cells = []
 
                     for label in display_labels:

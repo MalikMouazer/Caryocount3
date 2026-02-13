@@ -94,7 +94,7 @@ def parse_caryotype(chaine_iscn):
             pass
         # Extraction des anomalies structurelles
         for an in parts[2:]:
-            count = marker_occurrences(an)
+            count = anomaly_occurrences(an)
             anomalies.extend([an] * count)
             clone_map.setdefault(an, []).append(clone_name)
             entries.append({"anomaly": an, "clone": clone_name, "count": count})
@@ -228,6 +228,31 @@ def type_anomalie(anom):
     Retourne une chaîne décrivant le type d'anomalie.
     """
     base = strip_multiplicity(strip_sign(anom))
+    # Si une anomalie structurale est précédée d'un '+', ne pas l'interpréter
+    # comme un gain simple de chromosome.
+    if anom.startswith("+"):
+        if base.startswith("del"):
+            return "Délétion"
+        if base.startswith("dup"):
+            return "Duplication"
+        if base.startswith("inv"):
+            return "Inversion"
+        if base.startswith("ins"):
+            return "Insertion"
+        if base.startswith("add"):
+            return "Addition"
+        if base.startswith("der"):
+            return "Chromosome dérivé"
+        if base.startswith("dic"):
+            return "Chromosome dicentrique"
+        if base.startswith("idic"):
+            return "Isodicentric chromosome"
+        if base.startswith("ider"):
+            return "Isoderivative chromosome"
+        if base.startswith("i(") or "iso" in base:
+            return "Isochromosome"
+        if base.startswith("t("):
+            return "Translocation"
     if is_marker_anomaly(anom):
         m = re.match(r'^mar(\d+)$', base)
         suffix = m.group(1) if m else ""
@@ -350,6 +375,17 @@ def marker_occurrences(anom: str) -> int:
     return 1
 
 
+def anomaly_occurrences(anom: str) -> int:
+    """Nombre d'occurrences implicites pour une anomalie (×N ou marqueurs)."""
+
+    if is_marker_anomaly(anom):
+        return marker_occurrences(anom)
+    m = re.search(r"(?:x|×)(\d+)$", anom.strip(), re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return 1
+
+
 def is_tetraploid_context(anom: str, clone_map: dict[str, list[str]]) -> bool:
     """Indique si l'anomalie appartient à un clone en tétraploïdie."""
 
@@ -395,11 +431,12 @@ def detect_implicit_anomalies(anomalies):
     dictionnaire avec la clef ``reason`` décrivant la cause et ``ref``
     l'anomalie de référence à afficher entre parenthèses.
     """
-    norm_counts = Counter(normalize_anomaly(a) for a in anomalies)
+    unique_anoms = list(dict.fromkeys(anomalies))
+    norm_counts = Counter(normalize_anomaly(a) for a in unique_anoms)
     # mappage normalisé -> version originale pour l'affichage
     norm_to_orig: dict[str, str] = {}
     first_index: dict[str, int] = {}
-    for idx, a in enumerate(anomalies):
+    for idx, a in enumerate(unique_anoms):
         norm = normalize_anomaly(a)
         norm_to_orig.setdefault(norm, a)
         first_index.setdefault(norm, idx)
@@ -481,7 +518,7 @@ def detect_implicit_anomalies(anomalies):
         r'^(?:der|dic|del|dup|ins|t|i|ider|idic|r|add)\([0-9;]+\)'
     )
     base_map = {}
-    for a in anomalies:
+    for a in unique_anoms:
         norm = normalize_anomaly(a)
         # les gains/pertes répétés dans un même clone (ex: +8,+8)
         # correspondent à une trisomie ou tetrasomie et ne doivent pas
@@ -540,7 +577,7 @@ def apply_rule(condition: bool, rule_id: str, score: int, explanation: str) -> R
     return None
 
 
-def calcul_score_jondroville(anomalies):
+def calcul_score_jondroville(anomalies, clone_map):
     """Calcule le score global selon Jondreville 2020."""
 
     counts = Counter(anomalies)
@@ -550,6 +587,13 @@ def calcul_score_jondroville(anomalies):
 
     rule_ids = {}
     rule_expls = {}
+
+    def effective_count(anom: str, cnt: int) -> int:
+        if is_tetraploid_context(anom, clone_map):
+            m = re.search(r"(?:x|×)(\d+)$", anom.strip(), re.IGNORECASE)
+            if m and m.group(1) == "2":
+                return max(cnt // 2, 1)
+        return cnt
 
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
@@ -592,7 +636,8 @@ def calcul_score_jondroville(anomalies):
         score_per_occurrence = decision.score
         explanation = decision.explanation
         explanation = append_uncertainty_note(anom, explanation)
-        score = score_per_occurrence * cnt
+        eff_cnt = effective_count(anom, cnt)
+        score = score_per_occurrence * eff_cnt
         scores[anom] = score
         explanations[anom] = explanation
         total += score
@@ -667,8 +712,13 @@ def calcul_score_iscn(
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
         base = strip_sign(norm)
-        base_core = strip_multiplicity(base) if is_tetraploid_context(anom, clone_map) else base
+        base_core = strip_multiplicity(base)
         cnt_norm = norm_counts[norm]
+        eff_cnt = cnt
+        if is_tetraploid_context(anom, clone_map):
+            m = re.search(r"(?:x|×)(\d+)$", anom.strip(), re.IGNORECASE)
+            if m and m.group(1) == "2":
+                eff_cnt = max(cnt // 2, 1)
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
         is_constitutional, const_expl = constitutional_status(norm)
@@ -694,6 +744,22 @@ def calcul_score_iscn(
                     rule_id="ISCN.IMPLICIT",
                     score=0,
                     explanation=f"{info['reason']} ({info['ref']})",
+                )
+
+        if decision is None and norm.startswith("+"):
+            if base_core.startswith("i(") or base_core.startswith("del"):
+                chroms = get_chromosomes(base_core)
+                chr_label = chroms and sorted(chroms)[0] or ""
+                if base_core.startswith("i("):
+                    expl = "Équivalence sémantique: +i(...) = +chr + i(...)"
+                else:
+                    expl = "Équivalence sémantique: +del(...) = +chr + del(...)"
+                if chr_label:
+                    expl = f"{expl} (chr {chr_label})"
+                decision = RuleDecision(
+                    rule_id="ISCN.SEMANTIC_PLUS_STRUCT",
+                    score=2,
+                    explanation=expl,
                 )
 
         if decision is None:
@@ -813,9 +879,16 @@ def calcul_score_iscn(
                 )
 
         score = decision.score
-        if is_marker_anomaly(norm):
-            score = decision.score * cnt
         explication = decision.explanation
+        score_multiplier = eff_cnt
+        if (
+            decision.rule_id == "ISCN.SINGLE_CHR_DESEQ"
+            and norm.startswith("+")
+            and cnt_norm > 1
+        ):
+            score_multiplier = 1
+            explication = f"{explication} (gain répété : {anom})"
+        score = decision.score * score_multiplier
 
         total += score
         explication = append_uncertainty_note(anom, explication)
@@ -824,7 +897,7 @@ def calcul_score_iscn(
             "Anomalie": anom,
             "Type": type_anomalie(norm),
             "Explication": explication,
-            "Occurrences": cnt,
+            "Occurrences": eff_cnt,
             "Clones": ", ".join(clone_map.get(anom, [])),
             "Score ISCN 2024": score,
         })
@@ -930,7 +1003,7 @@ def analyser_formule(formule, debug: bool = False):
             scorable_anomalies, clone_map
         )
         jondroville_scores, jondroville_explanations, total_jondroville, rule_id_jon, rule_expl_jon = calcul_score_jondroville(
-            scorable_anomalies
+            scorable_anomalies, clone_map
         )
 
         df_iscn["Score Jondreville 2020"] = df_iscn["Anomalie"].apply(

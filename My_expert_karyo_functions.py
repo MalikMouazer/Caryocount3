@@ -147,11 +147,11 @@ def is_balanced_translocation(anom):
     Détecte les translocations équilibrées:
     t(NUM;NUM[;...])(p;q) sans der,+,-
     """
-    pattern = r'^t\(\??\d+(?:;\??\d+)+\)\(.+\)$'
+    pattern = r'^t\(\??(?:\d+|[XY])(?:;\??(?:\d+|[XY]))+\)\(.+\)$'
     if 'der' in anom or '+' in anom:
         return False
 
-    match = re.match(pattern, anom)
+    match = re.match(pattern, anom, re.IGNORECASE)
     if not match:
         return False
 

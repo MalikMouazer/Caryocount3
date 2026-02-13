@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import io
 import os
+import shutil
+import subprocess
 from datetime import datetime
 import sys
 from typing import Optional, Tuple
@@ -272,7 +275,7 @@ def _differs(a, b):
     return False
 
 
-def print_discordances(audit_rows, limit=20, baseline_rows=None):
+def print_discordances(audit_rows, limit=20, baseline_rows=None, baseline_label=None):
     discordances = []
     for row in audit_rows:
         if row["erreur"]:
@@ -306,6 +309,8 @@ def print_discordances(audit_rows, limit=20, baseline_rows=None):
     print(f"Indices: {', '.join(shown_indices) if shown_indices else '—'}")
 
     if baseline_rows is not None:
+        if baseline_label:
+            print(f"\nComparaison baseline: {baseline_label}")
         base_map = _index_map(baseline_rows)
         new_map = _index_map(discordances)
 
@@ -322,6 +327,39 @@ def print_discordances(audit_rows, limit=20, baseline_rows=None):
         print(f"Perturbées: {', '.join(perturbed) if perturbed else '—'}")
 
     return discordances
+
+
+def _load_baseline_csv(path: str):
+    try:
+        baseline_df = pd.read_csv(path)
+        return baseline_df.to_dict(orient="records")
+    except Exception as exc:
+        print(f"Warning: unable to load baseline '{path}': {exc}")
+        return None
+
+
+def _load_baseline_from_git(path: str):
+    try:
+        git_root = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        rel_path = os.path.relpath(os.path.abspath(path), git_root)
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        content = subprocess.check_output(
+            ["git", "show", f"HEAD:{rel_path}"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        baseline_df = pd.read_csv(io.StringIO(content))
+        return baseline_df.to_dict(orient="records"), commit
+    except Exception:
+        return None, None
 
 
 def _format_status(label: str, obtenu, ref, match):
@@ -409,6 +447,11 @@ def parse_args(argv):
         help="Previous audit CSV to flag new discordances.",
     )
     parser.add_argument(
+        "--prev",
+        action="store_true",
+        help="Compare only against previous audit CSV instead of commit baseline.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=20,
@@ -424,19 +467,37 @@ def main(argv=None) -> int:
         formule_col, count_i_col, count_j_col = detect_columns(df)
         audit_rows, summary = analyze_rows(df, formule_col, count_i_col, count_j_col)
         baseline_rows = None
+        baseline_label = None
         baseline_path = args.baseline
         if baseline_path is None and os.path.exists(args.out):
             baseline_path = args.out
         if baseline_path:
-            try:
-                baseline_df = pd.read_csv(baseline_path)
-                baseline_rows = baseline_df.to_dict(orient="records")
-            except Exception as exc:
-                print(f"Warning: unable to load baseline '{baseline_path}': {exc}")
+            baseline_rows = _load_baseline_csv(baseline_path)
+            if baseline_rows is not None:
+                baseline_label = os.path.basename(baseline_path)
+
+        commit_rows, commit_ref = _load_baseline_from_git(args.out)
         print_summary(summary)
-        discordances = print_discordances(
-            audit_rows, limit=args.limit, baseline_rows=baseline_rows
-        )
+        if args.prev:
+            discordances = print_discordances(
+                audit_rows,
+                limit=args.limit,
+                baseline_rows=baseline_rows,
+                baseline_label=baseline_label,
+            )
+        else:
+            discordances = print_discordances(
+                audit_rows,
+                limit=args.limit,
+                baseline_rows=commit_rows,
+                baseline_label=f"commit {commit_ref[:8]}" if commit_ref else None,
+            )
+        if os.path.exists(args.out):
+            prev_path = f"{args.out}.prev"
+            try:
+                shutil.copyfile(args.out, prev_path)
+            except Exception as exc:
+                print(f"Warning: unable to save previous audit to '{prev_path}': {exc}")
         export_audit_csv(discordances, args.out)
         print(f"Audit CSV ecrit: {args.out}")
         return 0

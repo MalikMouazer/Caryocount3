@@ -515,7 +515,7 @@ def detect_implicit_anomalies(anomalies):
 
     # 3) Répétitions de la même anomalie (même chromosome)
     base_pattern = re.compile(
-        r'^(?:der|dic|del|dup|ins|t|i|ider|idic|r|add)\([0-9;]+\)'
+        r'^(?:der|dic|t|i|ider|idic|r)\([0-9;]+\)'
     )
     base_map = {}
     for a in unique_anoms:
@@ -530,8 +530,11 @@ def detect_implicit_anomalies(anomalies):
         # de marquer implicites des dérivés distincts.
         if norm.startswith(('der', 'dic')):
             continue
-        m = base_pattern.match(norm)
-        base = m.group(0) if m else norm
+        if norm.startswith(("del", "dup", "add", "ins", "inv")):
+            base = norm
+        else:
+            m = base_pattern.match(norm)
+            base = m.group(0) if m else norm
         base_map.setdefault(base, []).append(norm)
     for norms in base_map.values():
         if len(norms) > 1:
@@ -577,10 +580,36 @@ def apply_rule(condition: bool, rule_id: str, score: int, explanation: str) -> R
     return None
 
 
-def calcul_score_jondroville(anomalies, clone_map):
+def calcul_score_jondroville(anomalies, clone_map, entries=None):
     """Calcule le score global selon Jondreville 2020."""
 
-    counts = Counter(anomalies)
+    def jon_dedup_key(anom: str) -> str:
+        norm = normalize_anomaly(anom)
+        if norm.startswith("t("):
+            m = re.match(r"^t\(([^)]+)\)", norm, re.IGNORECASE)
+            if m:
+                return f"t({m.group(1)})"
+        return norm
+
+    filtered = []
+    jon_dup_expl: dict[str, str] = {}
+    if entries is not None:
+        seen_by_key: dict[str, set[str]] = {}
+        for entry in entries:
+            anom = entry["anomaly"]
+            clone = entry["clone"]
+            key = jon_dedup_key(anom)
+            clones = seen_by_key.setdefault(key, set())
+            # Déduplication uniquement entre clones différents
+            if clones and clone not in clones:
+                jon_dup_expl[anom] = "Duplication avec l'anomalie de référence"
+                continue
+            clones.add(clone)
+            filtered.append(anom)
+    else:
+        filtered = list(anomalies)
+
+    counts = Counter(filtered)
     total = 0
     scores = {}
     explanations = {}
@@ -588,15 +617,13 @@ def calcul_score_jondroville(anomalies, clone_map):
     rule_ids = {}
     rule_expls = {}
 
-    def effective_count(anom: str, cnt: int) -> int:
+    for anom, cnt in counts.items():
+        norm = normalize_anomaly(anom)
+        eff_cnt = cnt
         if is_tetraploid_context(anom, clone_map):
             m = re.search(r"(?:x|×)(\d+)$", anom.strip(), re.IGNORECASE)
             if m and m.group(1) == "2":
-                return max(cnt // 2, 1)
-        return cnt
-
-    for anom, cnt in counts.items():
-        norm = normalize_anomaly(anom)
+                eff_cnt = max(cnt // 2, 1)
         # Ignorer les anomalies constitutionnelles (+Nc)
         is_constitutional, const_expl = constitutional_status(norm)
         decision = apply_rule(
@@ -635,8 +662,9 @@ def calcul_score_jondroville(anomalies, clone_map):
 
         score_per_occurrence = decision.score
         explanation = decision.explanation
+        if anom in jon_dup_expl:
+            explanation = jon_dup_expl[anom]
         explanation = append_uncertainty_note(anom, explanation)
-        eff_cnt = effective_count(anom, cnt)
         score = score_per_occurrence * eff_cnt
         scores[anom] = score
         explanations[anom] = explanation
@@ -929,11 +957,12 @@ def deduplicate_inter_clones(entries):
     marker_suppressed: dict[str, set[str]] = {}
     marker_ref_counts: dict[str, int] = {}
     for entry in entries:
-        norm = normalize_anomaly(entry["anomaly"])
+        raw_anom = entry["anomaly"]
+        norm = normalize_anomaly(raw_anom)
         clone = entry["clone"]
         count = int(entry.get("count", 1))
         is_marker = is_marker_anomaly(norm)
-        key_for_ref = strip_multiplicity(norm) if is_marker else norm
+        key_for_ref = strip_multiplicity(norm) if is_marker else raw_anom
 
         if key_for_ref not in first_clone_by_norm:
             first_clone_by_norm[key_for_ref] = clone
@@ -1003,7 +1032,7 @@ def analyser_formule(formule, debug: bool = False):
             scorable_anomalies, clone_map
         )
         jondroville_scores, jondroville_explanations, total_jondroville, rule_id_jon, rule_expl_jon = calcul_score_jondroville(
-            scorable_anomalies, clone_map
+            scorable_anomalies, clone_map, scorable_entries
         )
 
         df_iscn["Score Jondreville 2020"] = df_iscn["Anomalie"].apply(

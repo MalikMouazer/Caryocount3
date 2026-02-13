@@ -94,9 +94,10 @@ def parse_caryotype(chaine_iscn):
             pass
         # Extraction des anomalies structurelles
         for an in parts[2:]:
-            anomalies.append(an)
+            count = marker_occurrences(an)
+            anomalies.extend([an] * count)
             clone_map.setdefault(an, []).append(clone_name)
-            entries.append({"anomaly": an, "clone": clone_name})
+            entries.append({"anomaly": an, "clone": clone_name, "count": count})
     return anomalies, clone_map, entries
 
 
@@ -226,6 +227,11 @@ def type_anomalie(anom):
     Détermine le type d'anomalie pour l'affichage.
     Retourne une chaîne décrivant le type d'anomalie.
     """
+    base = strip_multiplicity(strip_sign(anom))
+    if is_marker_anomaly(anom):
+        m = re.match(r'^mar(\d+)$', base)
+        suffix = m.group(1) if m else ""
+        return f"Gain mar{suffix}"
     if is_repeat_notation(anom):
         return 'Notation de répétition d’anomalies'
     if is_complex_multichr_deseq(anom):
@@ -240,8 +246,9 @@ def type_anomalie(anom):
         return 'Ploidy'
     if '~' in anom:
         return 'Pléiade chromosomique'
-    if anom == '+mar':
-        return 'Chromosome marqueur'
+    base = strip_sign(anom)
+    if base.startswith('mar'):
+        return f"Gain {base}"
     if 'dmin' in anom:
         return 'Double minutes'
     if anom.startswith('hsr'):
@@ -306,6 +313,41 @@ def strip_multiplicity(anom: str) -> str:
     """Retire un suffixe de multiplicité (xN ou ×N) sans modifier le reste."""
 
     return re.sub(r"(?:x|×)\d+$", "", anom)
+
+
+def is_marker_anomaly(anom: str) -> bool:
+    """Indique si l'anomalie correspond à un marqueur (mar, +mar, +Nmar, +A~Bmar)."""
+
+    base = strip_multiplicity(strip_sign(anom)).lower()
+    return base.startswith("mar") or base.endswith("mar")
+
+
+def marker_occurrences(anom: str) -> int:
+    """Nombre d'occurrences implicites pour les marqueurs."""
+
+    raw = anom.strip()
+    if not raw.startswith("+"):
+        return 1
+    text = raw.replace("∼", "~")
+    low = text.lower()
+
+    # +Nmar
+    m = re.match(r"^\+(\d+)mar$", low)
+    if m:
+        return int(m.group(1))
+
+    # +A~Bmar -> B
+    m = re.match(r"^\+(\d+)~(\d+)mar$", low)
+    if m:
+        return int(m.group(2))
+
+    # +marN or +marNxM (N = identifiant)
+    m = re.match(r"^\+mar(\d+)(?:[x×](\d+))?$", low)
+    if m:
+        mult = int(m.group(2)) if m.group(2) else 1
+        return mult
+
+    return 1
 
 
 def is_tetraploid_context(anom: str, clone_map: dict[str, list[str]]) -> bool:
@@ -528,6 +570,13 @@ def calcul_score_jondroville(anomalies):
             )
         if decision is None:
             decision = apply_rule(
+                is_marker_anomaly(norm),
+                "JON.MAR",
+                1,
+                "Marqueur",
+            )
+        if decision is None:
+            decision = apply_rule(
                 norm.lower() == 'triploidy',
                 "JON.TRIPLOIDY",
                 0,
@@ -553,7 +602,10 @@ def calcul_score_jondroville(anomalies):
     return scores, explanations, total, rule_ids, rule_expls
 
 
-def calcul_score_iscn(anomalies, clone_map):
+def calcul_score_iscn(
+    anomalies,
+    clone_map,
+):
     """Calcule le détail des scores selon la grille ISCN 2024."""
 
     counts = Counter(anomalies)
@@ -643,6 +695,14 @@ def calcul_score_iscn(anomalies, clone_map):
                     score=0,
                     explanation=f"{info['reason']} ({info['ref']})",
                 )
+
+        if decision is None:
+            decision = apply_rule(
+                is_marker_anomaly(norm),
+                "ISCN.MAR",
+                1,
+                "Marqueur",
+            )
 
         if decision is None:
             decision = apply_rule(
@@ -753,6 +813,8 @@ def calcul_score_iscn(anomalies, clone_map):
                 )
 
         score = decision.score
+        if is_marker_anomaly(norm):
+            score = decision.score * cnt
         explication = decision.explanation
 
         total += score
@@ -791,32 +853,55 @@ def deduplicate_inter_clones(entries):
     first_clone_by_norm: dict[str, str] = {}
     scorable_entries: list[dict[str, str]] = []
     clone_details_map: dict[str, dict[str, dict[str, object]]] = {}
-
+    marker_suppressed: dict[str, set[str]] = {}
+    marker_ref_counts: dict[str, int] = {}
     for entry in entries:
         norm = normalize_anomaly(entry["anomaly"])
         clone = entry["clone"]
+        count = int(entry.get("count", 1))
+        is_marker = is_marker_anomaly(norm)
+        key_for_ref = strip_multiplicity(norm) if is_marker else norm
 
-        if norm not in first_clone_by_norm:
-            first_clone_by_norm[norm] = clone
-        ref_clone = first_clone_by_norm[norm]
+        if key_for_ref not in first_clone_by_norm:
+            first_clone_by_norm[key_for_ref] = clone
+        ref_clone = first_clone_by_norm[key_for_ref]
         is_reference = clone == ref_clone
 
         clone_bucket = clone_details_map.setdefault(entry["anomaly"], {})
-        bucket_entry = clone_bucket.setdefault(clone, {
-            "label": display_clone_label(clone),
-            "is_reference": is_reference,
-            "reason": "",
-            "count": 0,
-        })
 
-        bucket_entry["count"] = bucket_entry.get("count", 0) + 1
+        def get_bucket(key, is_ref, reason):
+            bucket_entry = clone_bucket.setdefault(key, {
+                "label": display_clone_label(clone),
+                "is_reference": is_ref,
+                "reason": reason,
+                "count": 0,
+            })
+            return bucket_entry
 
-        if not is_reference:
-            bucket_entry["is_reference"] = False
-            bucket_entry["reason"] = f"Anomalie déjà comptée dans {display_clone_label(ref_clone)}"
+        suppressed_one = False
+        scorable_count = count if is_reference else 0
+        if is_reference and is_marker:
+            marker_ref_counts.setdefault(key_for_ref, count)
+        if not is_reference and is_marker:
+            ref_count = marker_ref_counts.get(key_for_ref, 0)
+            suppressed = marker_suppressed.setdefault(key_for_ref, set())
+            if clone not in suppressed and ref_count > 0:
+                suppressed.add(clone)
+                suppressed_one = True
+            scorable_count = max(count - ref_count, 0)
 
-        if is_reference:
-            scorable_entries.append(entry)
+        if scorable_count > 0:
+            reason = ""
+            if suppressed_one:
+                ref_count = marker_ref_counts.get(key_for_ref, 1)
+                reason = f"{ref_count} marqueur déjà compté dans {display_clone_label(ref_clone)}"
+            bucket_entry = get_bucket(clone, True, reason)
+            display_increment = 1 if is_marker else scorable_count
+            bucket_entry["count"] = bucket_entry.get("count", 0) + display_increment
+            if not is_reference and is_marker:
+                bucket_entry["is_reference"] = True
+            for _ in range(scorable_count):
+                scorable_entries.append(entry)
 
     clone_details_ready = {
         anom: list(clone_dict.values()) for anom, clone_dict in clone_details_map.items()

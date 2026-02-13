@@ -306,6 +306,20 @@ with tab1:
                     unsafe_allow_html=True
                 )
 
+                if totals.get("formule_equivalente"):
+                    st.markdown(
+                        f"""
+                        <div style="margin: 10px 0;">
+                            <div><strong>Formule :</strong> {html.escape(totals.get('formule_originale', ''))}<br>
+                                <span style="display:inline-block; border:2px solid #f5c542; border-radius:999px; padding:2px 8px; background:#fff8e1;">
+                                    {html.escape(totals.get('formule_equivalente', ''))}
+                                </span>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
                 # Affichage du tableau avec info-bulles
                 st.markdown("### Détail des anomalies")
 
@@ -496,6 +510,8 @@ with tab2:
                         "Comptage Jon": comptage_jondroville,
                         "Anomalies détectées": anomalies_detail  # Version texte pour l'export
                     }
+                    if totals.get("formule_equivalente"):
+                        result_row["_FormuleEquivalente"] = totals.get("formule_equivalente", "")
 
                     if has_count_i:
                         result_row["Ref ISCN"] = ref_iscn_value
@@ -512,6 +528,8 @@ with tab2:
                 columns_order.append("Comptage Jon")
                 if has_count_j:
                     columns_order.append("Ref Jon")
+                if "_FormuleEquivalente" in results_df.columns:
+                    columns_order.append("_FormuleEquivalente")
                 columns_order.append("Anomalies détectées")
                 results_df = results_df[columns_order]
 
@@ -601,6 +619,18 @@ with tab2:
                             else:
                                 anomalies_html = format_anomalies_compact(anomalies["df"])
                                 cells.append(f"<td>{anomalies_html}</td>")
+                        elif label == "Formule":
+                            value = format_display(row_data.get(label))
+                            equiv = format_display(row_data.get("_FormuleEquivalente"))
+                            if equiv and equiv != "—":
+                                ring = (
+                                    "<span style='display:inline-block; border:2px solid #f5c542; "
+                                    "border-radius:999px; padding:2px 8px; background:#fff8e1;'>"
+                                    f"{html.escape(equiv)}</span>"
+                                )
+                                cells.append(f"<td>{html.escape(value)}<br>{ring}</td>")
+                            else:
+                                cells.append(f"<td>{html.escape(value)}</td>")
                         else:
                             value = format_display(row_data.get(label))
                             cells.append(f"<td>{html.escape(value)}</td>")

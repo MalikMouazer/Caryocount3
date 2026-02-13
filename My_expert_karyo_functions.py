@@ -47,6 +47,59 @@ def count_known_chromosomes(chroms: set[str]) -> int:
     return sum(1 for c in chroms if c != '?')
 
 # Parsing de la formule karyotypique
+def expand_condensed_clone(clone: str) -> tuple[str, bool]:
+    """Déplie une écriture condensée de type 50(25,X,+X,+21)×2[9]."""
+
+    pattern = re.compile(r"^(\d+)\(([^)]*)\)[x×](\d+)(\[[^\]]+\])?$")
+    m = pattern.match(clone)
+    if not m:
+        return clone, False
+
+    total, inner, mult_raw, suffix = m.groups()
+    mult = int(mult_raw)
+    tokens = [t for t in inner.split(",") if t]
+    sex_x = 0
+    sex_y = 0
+    expanded: list[str] = []
+    for tok in tokens:
+        if re.fullmatch(r"\d+", tok):
+            continue
+        if tok in ("X", "Y"):
+            if tok == "X":
+                sex_x += mult
+            else:
+                sex_y += mult
+            continue
+        expanded.extend([tok] * mult)
+
+    sex_token = ""
+    if sex_x or sex_y:
+        sex_token = ("X" * sex_x) + ("Y" * sex_y)
+
+    parts = []
+    if sex_token:
+        parts.append(sex_token)
+    parts.extend(expanded)
+
+    expanded_str = ",".join(parts)
+    base = f"{total}" if not expanded_str else f"{total},{expanded_str}"
+    return f"{base}{suffix or ''}", True
+
+
+def expand_condensed_formula(formule: str) -> tuple[str, bool]:
+    """Déplie les notations condensées dans une formule ISCN."""
+
+    cleaned = re.sub(r"\s+", "", formule)
+    clones = cleaned.split("/")
+    changed = False
+    expanded_clones = []
+    for clone in clones:
+        expanded, did_change = expand_condensed_clone(clone)
+        changed = changed or did_change
+        expanded_clones.append(expanded)
+    return "/".join(expanded_clones), changed
+
+
 def parse_caryotype(chaine_iscn):
     """Parse une chaîne ISCN et renvoie les anomalies par clone.
 
@@ -59,11 +112,13 @@ def parse_caryotype(chaine_iscn):
     """
     # Remove all whitespace for robust parsing
     chaine_iscn = re.sub(r"\s+", "", chaine_iscn)
-    
+
     anomalies = []
     clone_map = {}
     entries: list[dict[str, str]] = []
-    clones = [re.sub(r"\[.*?\]", "", c) for c in chaine_iscn.split('/')]
+    clones_raw = chaine_iscn.split('/')
+    clones = [expand_condensed_clone(c)[0] for c in clones_raw]
+    clones = [re.sub(r"\[.*?\]", "", c) for c in clones]
     for idx, clone in enumerate(clones, start=1):
         clone_name = f"clone{idx}"
         parts = [p.strip().strip('.') for p in clone.split(',') if p.strip()]
@@ -1139,7 +1194,8 @@ def analyser_formule(formule, debug: bool = False):
     - Une erreur éventuelle
     """
     try:
-        anomalies, clone_map, entries = parse_caryotype(formule)
+        expanded_formula, condensed_changed = expand_condensed_formula(formule)
+        anomalies, clone_map, entries = parse_caryotype(expanded_formula)
 
         # Déduplication inter-clones: seule la première apparition d'une
         # anomalie (normalisée) est comptabilisée, les autres clones obtiennent
@@ -1180,6 +1236,11 @@ def analyser_formule(formule, debug: bool = False):
                 lambda anom: "" if anom == "TOTAL" else rule_expl_jon.get(anom, "")
             )
 
-        return df_iscn, {"iscn": total_iscn, "jondroville": total_jondroville}, None
+        return df_iscn, {
+            "iscn": total_iscn,
+            "jondroville": total_jondroville,
+            "formule_originale": formule if condensed_changed else "",
+            "formule_equivalente": expanded_formula if condensed_changed else "",
+        }, None
     except Exception as e:
         return None, {"iscn": 0, "jondroville": 0}, f"Erreur lors de l'analyse de la formule: {str(e)}"

@@ -343,14 +343,6 @@ def type_anomalie(anom):
         return f"Gain mar{suffix}"
     if is_repeat_notation(anom):
         return 'Notation de répétition d’anomalies'
-    if is_complex_multichr_deseq(anom):
-        return 'Multichromosomique déséquilibrée'
-    if is_balanced_translocation(anom):
-        return 'Translocation équilibrée'
-    if is_unbalanced_translocation(anom):
-        return 'Translocation déséquilibrée'
-    if is_balanced_insertion(anom):
-        return 'Insertion équilibrée'
     if anom == '<2n>':
         return 'Ploidy'
     if '~' in anom:
@@ -396,7 +388,15 @@ def type_anomalie(anom):
         return 'Isoderivative chromosome'
     if anom.startswith('i(') or 'iso' in anom:
         return 'Isochromosome'
-    return 'Autre'
+    if is_complex_multichr_deseq(anom):
+        return 'Multichromosomique déséquilibrée'
+    if is_balanced_translocation(anom):
+        return 'Translocation équilibrée'
+    if is_unbalanced_translocation(anom):
+        return 'Translocation déséquilibrée'
+    if is_balanced_insertion(anom):
+        return 'Insertion équilibrée'
+    return '-'
 
 # Calcul des scores
 # =========================
@@ -768,7 +768,7 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons:
             decision = RuleDecision(
                 rule_id="JON.DEFAULT",
                 score=1,  # Chaque anomalie non-constitutionnelle vaut 1 point
-                explanation="Anomalie non constitutionnelle",
+                explanation="-",
             )
 
         score_per_occurrence = decision.score

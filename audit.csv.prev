@@ -1,40 +1,8 @@
 index,formule,iscn_status,jon_status,erreur
-9,"46,XY,der(7)del(7)(p15)del(7)(q32)[20]",ISCN False None au lieu de 1,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-20,"46,XX,der(19)t(1;19)(q23;p13.3)[11]/46,XX[9]",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-21,"46,XY,der(22)ins(22;9)(q11.2;q34q34)del(22)(q13)[20]",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-22,"46,XX,der(5)t(5;7)(q14;q11.2)t(7;18)(q22;q21.1)t(18;21)(q23;q11.2)[20]",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-23,"45,XX,der(1)r(1;3)(p34q23;q21q27),-7,del(12)(p13p11.2)[12]/46,XX[8]",ISCN False None au lieu de 4,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-26,"46,XX,+1,der(1;7)(q10;p10)[20]",ISCN False None au lieu de 2,Jon False None au lieu de 2,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-27,"46,XY,+1,der(1;7)(q10;p10)[11]/46,idem,add(3)(q12)[6]/46,XY[3]",ISCN False None au lieu de 3,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-28,"49,XY,+Y,+1,der(1;7)(q10;q10),+8,+14,del(20)(q11.2q13.3)[15]/46,XY[5]",ISCN False None au lieu de 6,Jon False None au lieu de 6,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-29,"46,XX,der(5)t(5;7)(q14;q11.2)t(7;18)(q22;q21.1)t(18;21)(q23;q11.2),hsr(11)(q23),5~25dmin[20]",ISCN False None au lieu de 4,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-30,"47,XX,del(3)(q21),del(5)(q13q34),del(7)(q22),+8,+8,der(10;15)(q10;q10),t(12;21)(q24.1;q22)[19]/46,XX[1]",ISCN False None au lieu de 8,Jon False None au lieu de 7,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-37,"60<2n>,XY,+X,+Y,+4,+5,+6,+8,+8,der(9)t(9;11)(q34;q13),+10, del(10)(q24),+11,+12,+14,+18,+21,+21[18]/46,XY[2]",ISCN False None au lieu de 17,Jon False None au lieu de 16,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-38,"46,XX,der(2)add(2)(p23)t(2;11)(q31;p15),t(4;11)(q21;q23),der(11)t(2;11)[18]/46,XX[2]",ISCN False None au lieu de 3,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-40,"47,XX,-13,der(17)t(13;?;17)(q?21;?;p13)",ISCN False None au lieu de 2,Jon False None au lieu de 2,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-46,"46,XY,del(13)(q14q31)[8]/46,sl,del(11)(q?14q22)[2]/46,sl,t(3;8)(q2?7;q2?3),add(11)(q23)[1]/46,XY,der(8)t(?;8)(?;q24)[2]/46,XY[3]",ISCN False None au lieu de 5,Jon False None au lieu de 5,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-47,"46,XY,del(11)(q13q25)[8]/46,idem,del(1)(q2?5q3?2)[3]/46,XY,der(2)t(2;11)(p12;q?),der(11)t(2;11)(p12;q1?3)[5]/46,XY[4]",ISCN False None au lieu de 4,Jon False None au lieu de 4,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-48,"46,XY,ins(?5;11)(q?22;q?),der(7)t(7;13)(q12;q14),der(11)t(7;11)(q12;q14),der(13)t(11;13)(q?;q1?3)[19]/46,XY[1]
-",ISCN False None au lieu de 7,Jon False None au lieu de 4,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-49,"46,XY,der(3)t(3;18)(p22;q12)[13]/46,idem,del(14)(q21q31)[5]/46,XY,t(3;18)(p22;q12),add(12)(p13)[cp2]",ISCN False None au lieu de 5,Jon False None au lieu de 4,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-50,"45,XX,-4,der(17)t(4;17)(q?21;p?12)[7]/46,XX,?t(17;21)(?p12;?q)[3]/45,XX,-14,der(17)t(14;17)(q1?2;p?12)[2]/46,XX[3]",ISCN False None au lieu de 5,Jon False None au lieu de 5,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-51,"45,XY,der(8;17)(q10;q10),der(22)t(8;22)(q13;q13)[4]/44,XY,sl,dic(11;18)(q13;p11)[16]",ISCN False None au lieu de 6,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-53,"45,XY,-13,der(17)t(13;?;17)(q?21;?;p13)[16]/45,sl,t(1;9;8)(p32;q31;q24)[3]/46,XY[1]",ISCN False None au lieu de 3,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-55,"46,XY,der(3)t(3;21)(p21;q11)inv(3)(p21q27),der(21)t(3;21)(p21;q11)[5]/46,XY,t(2;8)(p12;q24)[1]/46,XY[14] ",ISCN False None au lieu de 3,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-57,"46,XY,der(1)t(1;14)(q?41;q12),der(14)t(1;14)(q?41;q12)[4]/46,XY[16] ",ISCN False None au lieu de 2,Jon False None au lieu de 2,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-58,"46,XY,der(9)inv(9)(p23p13)del(9)(q22q33)",ISCN False None au lieu de 1,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-59,"46,XY,der(1)t(1;3)(p32;q21)t(3;7)(q28;q11.2)",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-60,"47,XY,+der(8)r(8;17;1)(p23q13;q12q25;p36.3p32)",ISCN False 3 au lieu de 2,Jon ok 1/1,
-61,"46,XX,der(1)del(1)(p34p22)ins(1;17)(p34;q25q11.2)",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-62,"46,XY,der(7)ins(7;?)(q22;?)t(2;7)(q21;q22)",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-63,"45,XX,der(8;8)(q10;q10)del(8)(q22)t(8;9)(q24.1;q12)",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-64,"46,XX,der(1)t(1;3)(p34.3;q21),der(1)t(1;3)(p34.3;q21)[15]",ISCN False None au lieu de 4,Jon False None au lieu de 2,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-65,"46,XX,der(1)t(1;3)(p32;q21)inv(1)(p22q21)t(1;11)(q25;q13),der(3)t(1;3),der(11)t(1;11)",ISCN False None au lieu de 3,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-66,"47,XY,der(9)t(9;22)(q34;q11.2),+22,ider(22)(q10)t(9;22)",ISCN False None au lieu de 4,Jon False None au lieu de 3,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-70,"46,XY,der(1)del(1)(p33p21)hsr(1)(p33)[10]",ISCN False None au lieu de 1,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-73,"46,XX,der(5)ins(5;2)(p14;q32q22)",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-84,"45,XX,der(1;3)(p10;q10)",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-85,"46,XX,der(1;3)(p10;q10),+3",ISCN False None au lieu de 2,Jon False None au lieu de 2,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-86,"44,XY,–1,der(1;3)(p10;q10)",ISCN False None au lieu de 2,Jon False None au lieu de 2,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-100,"46,XX,der(19)t(1;19)(q23;p13),inc[4]",ISCN False None au lieu de 2,Jon False None au lieu de 1,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
-105,"46,XX,der(7)t(7;13)(p1?5;q?22),der(8)t(2;8)(p2?2;q24),der(10)t(7;10)(q11;p1?2),del(11)(q22q24),der(13)t(8;13)(q2?2;q3?4)[9]/45,sl,der(4)t(2;4)(p2?2;p?12),-der(8)t(2;8)[2]/46,XX[4]",ISCN False None au lieu de 12,Jon False None au lieu de 7,Erreur lors de l'analyse de la formule: name 'der_t_lead' is not defined
+38,"46,XX,der(2)add(2)(p23)t(2;11)(q31;p15),t(4;11)(q21;q23),der(11)t(2;11)[18]/46,XX[2]",ISCN False 2 au lieu de 3,Jon ok 3/3,
+47,"46,XY,del(11)(q13q25)[8]/46,idem,del(1)(q2?5q3?2)[3]/46,XY,der(2)t(2;11)(p12;q?),der(11)t(2;11)(p12;q1?3)[5]/46,XY[4]",ISCN False 3 au lieu de 4,Jon ok 4/4,
+55,"46,XY,der(3)t(3;21)(p21;q11)inv(3)(p21q27),der(21)t(3;21)(p21;q11)[5]/46,XY,t(2;8)(p12;q24)[1]/46,XY[14] ",ISCN False 2 au lieu de 3,Jon ok 3/3,
+57,"46,XY,der(1)t(1;14)(q?41;q12),der(14)t(1;14)(q?41;q12)[4]/46,XY[16] ",ISCN False 1 au lieu de 2,Jon ok 2/2,
+64,"46,XX,der(1)t(1;3)(p34.3;q21),der(1)t(1;3)(p34.3;q21)[15]",ISCN False 2 au lieu de 4,Jon ok 2/2,
+65,"46,XX,der(1)t(1;3)(p32;q21)inv(1)(p22q21)t(1;11)(q25;q13),der(3)t(1;3),der(11)t(1;11)",ISCN False 2 au lieu de 3,Jon ok 3/3,
+86,"44,XY,–1,der(1;3)(p10;q10)",ISCN False 3 au lieu de 2,Jon ok 2/2,

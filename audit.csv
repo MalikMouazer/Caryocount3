@@ -3,7 +3,5 @@ index,formule,iscn_status,jon_status,erreur
 47,"46,XY,del(11)(q13q25)[8]/46,idem,del(1)(q2?5q3?2)[3]/46,XY,der(2)t(2;11)(p12;q?),der(11)t(2;11)(p12;q1?3)[5]/46,XY[4]",ISCN False 3 au lieu de 4,Jon ok 4/4,
 55,"46,XY,der(3)t(3;21)(p21;q11)inv(3)(p21q27),der(21)t(3;21)(p21;q11)[5]/46,XY,t(2;8)(p12;q24)[1]/46,XY[14] ",ISCN False 2 au lieu de 3,Jon ok 3/3,
 57,"46,XY,der(1)t(1;14)(q?41;q12),der(14)t(1;14)(q?41;q12)[4]/46,XY[16] ",ISCN False 1 au lieu de 2,Jon ok 2/2,
-60,"47,XY,+der(8)r(8;17;1)(p23q13;q12q25;p36.3p32)",ISCN False 3 au lieu de 2,Jon ok 1/1,
 65,"46,XX,der(1)t(1;3)(p32;q21)inv(1)(p22q21)t(1;11)(q25;q13),der(3)t(1;3),der(11)t(1;11)",ISCN False 2 au lieu de 3,Jon ok 3/3,
 86,"44,XY,–1,der(1;3)(p10;q10)",ISCN False 3 au lieu de 2,Jon ok 2/2,
-105,"46,XX,der(7)t(7;13)(p1?5;q?22),der(8)t(2;8)(p2?2;q24),der(10)t(7;10)(q11;p1?2),del(11)(q22q24),der(13)t(8;13)(q2?2;q3?4)[9]/45,sl,der(4)t(2;4)(p2?2;p?12),-der(8)t(2;8)[2]/46,XX[4]",ISCN False 11 au lieu de 12,Jon ok 7/7,

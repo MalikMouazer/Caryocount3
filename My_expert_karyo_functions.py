@@ -644,6 +644,10 @@ def detect_implicit_anomalies(anomalies):
     derived_groups = {}
     for an in norm_counts:
         if an.startswith(('der', 'dic')):
+            # Ne pas marquer implicites les dérivés porteurs d'une translocation
+            # (cas des t déséquilibrées potentiellement légitimes).
+            if "t(" in an:
+                continue
             chroms = tuple(sorted(get_chromosomes(an)))
             if chroms:
                 derived_groups.setdefault(chroms, []).append(an)
@@ -823,21 +827,27 @@ def calcul_score_iscn(
     def has_extra_der_components(anom_str: str) -> bool:
         return bool(re.search(r"(add|del|dup|ins|inv|r\()", anom_str))
 
-    def t_keys_in_str(anom_str: str) -> set[tuple[str, ...]]:
-        keys: set[tuple[str, ...]] = set()
-        for m in re.finditer(r"t\(([^)]*)\)", anom_str, re.IGNORECASE):
+    def t_entries_in_str(anom_str: str) -> list[tuple[tuple[str, ...], str | None]]:
+        entries: list[tuple[tuple[str, ...], str | None]] = []
+        for m in re.finditer(r"t\(([^)]*)\)(?:\(([^)]*)\))?", anom_str, re.IGNORECASE):
             chroms = [c.lstrip("?") for c in m.group(1).split(";") if c]
             if not chroms:
                 continue
-            keys.add(tuple(sorted(chroms)))
-        return keys
+            key = tuple(sorted(chroms))
+            bp = m.group(2)
+            entries.append((key, bp))
+        return entries
 
     der_t_map: dict[tuple[str, ...], dict[str, object]] = {}
     der_t_by_anom: dict[str, str] = {}
     der_t_any: dict[str, set[tuple[str, ...]]] = {}
     ider_t_any: dict[str, set[tuple[str, ...]]] = {}
     # clone -> tkey -> list of (anom, anchor, is_der)
+    t_pairs_by_clone: dict[str, dict[tuple[str, ...], list[tuple[str, str, bool]]]] = {}
+    # clone -> tkey -> list of (anom, anchor, is_der) for balanced keys
     balanced_t_keys_by_clone: dict[str, dict[tuple[str, ...], list[tuple[str, str, bool]]]] = {}
+    # clone -> tkey -> set of breakpoint strings (non-empty)
+    t_bp_by_clone: dict[str, dict[tuple[str, ...], set[str]]] = {}
 
     def t_key_from_str(text: str) -> tuple[str, ...] | None:
         m = re.match(r"^t\(([^)]*)\)", text, re.IGNORECASE)
@@ -854,24 +864,26 @@ def calcul_score_iscn(
         base_core = strip_multiplicity(base)
         if not base_core.startswith(("der", "ider")):
             continue
-        t_keys = t_keys_in_str(base_core)
-        if not t_keys:
+        t_entries = t_entries_in_str(base_core)
+        if not t_entries:
             continue
         if base_core.startswith("ider"):
-            ider_t_any[anom] = t_keys
+            ider_t_any[anom] = {k for k, _ in t_entries}
             anchor_match = re.match(r"^ider\(([^)]+)\)", base_core, re.IGNORECASE)
             anchor = anchor_match.group(1) if anchor_match else ""
             is_der = False
         else:
-            der_t_any[anom] = t_keys
+            der_t_any[anom] = {k for k, _ in t_entries}
             anchor_match = re.match(r"^der\(([^)]+)\)", base_core, re.IGNORECASE)
             anchor = anchor_match.group(1) if anchor_match else ""
             is_der = True
-        for key in t_keys:
+        for key, bp in t_entries:
             for clone in clone_map.get(anom, []):
-                balanced_t_keys_by_clone.setdefault(clone, {}).setdefault(key, []).append(
+                t_pairs_by_clone.setdefault(clone, {}).setdefault(key, []).append(
                     (anom, anchor, is_der)
                 )
+                if bp:
+                    t_bp_by_clone.setdefault(clone, {}).setdefault(key, set()).add(bp)
         for entry in extract_t_entries(base_core):
             key = entry["key"]
             bp = entry["bp"]
@@ -891,22 +903,32 @@ def calcul_score_iscn(
         for anom in anoms:
             der_t_by_anom[anom] = t_str
 
-    # équilibrée si au moins un der est présent + un autre der ou ider
     # équilibrée si au moins un der est présent + un autre der/ider avec un ancrage différent (même clone)
-    for clone, tmap in list(balanced_t_keys_by_clone.items()):
+    for clone, tmap in list(t_pairs_by_clone.items()):
         filtered = {}
         for k, items in tmap.items():
             anchors = {anchor for _, anchor, _ in items if anchor}
             has_der = any(is_der for _, _, is_der in items)
+            bp_set = t_bp_by_clone.get(clone, {}).get(k, set())
+            # équilibrée si 2 ancrages et pas d'incertitude sur les points de cassure
             if len(anchors) >= 2 and has_der:
-                filtered[k] = items
+                bp_has_uncertainty = any("?" in bp for bp in bp_set)
+                if bp_has_uncertainty:
+                    continue
+                # équilibrée si aucun bp explicite ou bp explicite identique
+                if len(bp_set) <= 1:
+                    filtered[k] = items
         balanced_t_keys_by_clone[clone] = filtered
-    explicit_t_keys = {
-        t_key_from_str(normalize_anomaly(a))
-        for a in anomalies
-        if normalize_anomaly(a).startswith("t(")
-    }
-    explicit_t_keys.discard(None)
+    explicit_t_keys_by_clone: dict[str, set[tuple[str, ...]]] = {}
+    for a in anomalies:
+        norm_a = normalize_anomaly(a)
+        if not norm_a.startswith("t("):
+            continue
+        tkey = t_key_from_str(norm_a)
+        if not tkey:
+            continue
+        for clone in clone_map.get(a, []):
+            explicit_t_keys_by_clone.setdefault(clone, set()).add(tkey)
     counted_t_keys: dict[str, set[tuple[str, ...]]] = {}
 
     def has_der_with_same_t(anom_str: str) -> bool:
@@ -970,17 +992,19 @@ def calcul_score_iscn(
         if decision is None and norm.startswith("t("):
             tkey = t_key_from_str(norm)
             clone_keys = set(clone_map.get(anom, []))
-            has_balanced = False
+            has_pair = False
+            is_balanced = False
             if tkey:
                 for clone in clone_keys:
+                    if tkey in t_pairs_by_clone.get(clone, {}):
+                        has_pair = True
                     if tkey in balanced_t_keys_by_clone.get(clone, {}):
-                        has_balanced = True
-                        break
-            if tkey and has_balanced:
+                        is_balanced = True
+            if tkey and has_pair:
                 decision = RuleDecision(
-                    rule_id="ISCN.BALANCED_T",
-                    score=1,
-                    explanation="Translocation équilibrée (dérivés réciproques)",
+                    rule_id="ISCN.BALANCED_T" if is_balanced else "ISCN.UNBALANCED_T",
+                    score=1 if is_balanced else 2,
+                    explanation="Translocation équilibrée (dérivés réciproques)" if is_balanced else "Translocation déséquilibrée",
                 )
                 for clone in clone_keys:
                     counted_t_keys.setdefault(clone, set()).add(tkey)
@@ -1001,21 +1025,18 @@ def calcul_score_iscn(
                 )
 
         if decision is None and norm.startswith("+"):
-            if base_core.startswith("i(") or base_core.startswith("del") or base_core.startswith("der"):
+            if base_core.startswith("i(") or base_core.startswith("del"):
                 chroms = get_chromosomes(base_core)
                 chr_label = chroms and sorted(chroms)[0] or ""
                 if base_core.startswith("i("):
                     expl = "Équivalence sémantique: +i(...) = +chr + i(...)"
                 elif base_core.startswith("del"):
                     expl = "Équivalence sémantique: +del(...) = +chr + del(...)"
-                else:
-                    expl = "Équivalence sémantique: +der(...) = +chr + der(...)"
                 if chr_label:
                     expl = f"{expl} (chr {chr_label})"
-                score_value = 3 if base_core.startswith("der") else 2
                 decision = RuleDecision(
                     rule_id="ISCN.SEMANTIC_PLUS_STRUCT",
-                    score=score_value,
+                    score=2,
                     explanation=expl,
                 )
 
@@ -1038,29 +1059,41 @@ def calcul_score_iscn(
         if decision is None and base_core.startswith('der'):
             t_keys = der_t_any.get(anom, set())
             clone_keys = clone_map.get(anom, [])
-            balanced_key = None
-            balanced_clone = None
+            chosen_key = None
+            chosen_clone = None
+            is_balanced = False
             for clone in clone_keys:
                 for k in t_keys:
-                    if k in balanced_t_keys_by_clone.get(clone, {}):
-                        balanced_key = k
-                        balanced_clone = clone
+                    if k in t_pairs_by_clone.get(clone, {}):
+                        chosen_key = k
+                        chosen_clone = clone
+                        is_balanced = k in balanced_t_keys_by_clone.get(clone, {})
                         break
-                if balanced_key:
+                if chosen_key:
                     break
-            if balanced_key and balanced_clone:
-                if balanced_key not in explicit_t_keys and balanced_key not in counted_t_keys.get(balanced_clone, set()):
+            if chosen_key and chosen_clone:
+                # Si second chromosome incertain, ne pas surcoter via la t
+                chroms = get_chromosomes(base_core)
+                if len(chosen_key) < 2 or "?" in chroms:
+                    decision = None
+                elif chosen_key in explicit_t_keys_by_clone.get(chosen_clone, set()):
                     decision = RuleDecision(
-                        rule_id="ISCN.BALANCED_T_VIA_DER",
-                        score=1,
-                        explanation="Translocation équilibrée (comptée via dérivé)",
+                        rule_id="ISCN.DER_T_COUNTED",
+                        score=0,
+                        explanation="Dérivé associé à une translocation comptée",
                     )
-                    counted_t_keys.setdefault(balanced_clone, set()).add(balanced_key)
+                elif chosen_key not in counted_t_keys.get(chosen_clone, set()):
+                    decision = RuleDecision(
+                        rule_id="ISCN.T_VIA_DER",
+                        score=1 if is_balanced else 2,
+                        explanation="Translocation équilibrée (comptée via dérivé)" if is_balanced else "Translocation déséquilibrée (comptée via dérivé)",
+                    )
+                    counted_t_keys.setdefault(chosen_clone, set()).add(chosen_key)
                 else:
                     decision = RuleDecision(
-                        rule_id="ISCN.DER_BALANCED_T",
+                        rule_id="ISCN.DER_T_COUNTED",
                         score=0,
-                        explanation="Dérivé associé à une translocation équilibrée",
+                        explanation="Dérivé associé à une translocation comptée",
                     )
 
         if decision is None and base_core.startswith('der'):
@@ -1109,11 +1142,15 @@ def calcul_score_iscn(
 
         # Si un der contient une anomalie structurale additionnelle, on ajoute +1.
         # Liste restreinte (à élargir si besoin) : add, inv, ins, del, dup.
+        # Si un der est préfixé par '+', on ajoute +1 pour le gain du chromosome d'ancrage.
         extra_component = None
+        extra_der_gain = False
         if base_core.startswith("der"):
             extra_match = re.search(r"(add|inv|ins|del|dup)\(", base_core)
             if extra_match:
                 extra_component = extra_match.group(1)
+            if norm.startswith("+"):
+                extra_der_gain = True
 
         if decision is None and norm.startswith(("+", "-")):
             decision = apply_rule(
@@ -1192,6 +1229,9 @@ def calcul_score_iscn(
         if extra_component:
             score += 1
             explication = f"{explication} (+1 pour {extra_component})"
+        if extra_der_gain:
+            score += 1
+            explication = f"{explication} (+1 pour +chr)"
 
         total += score
         explication = append_uncertainty_note(anom, explication)

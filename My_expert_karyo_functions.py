@@ -1107,6 +1107,14 @@ def calcul_score_iscn(
                     explanation="Chromosome dérivé issu du même chromosome",
                 )
 
+        # Si un der contient une anomalie structurale additionnelle, on ajoute +1.
+        # Liste restreinte (à élargir si besoin) : add, inv, ins, del, dup.
+        extra_component = None
+        if base_core.startswith("der"):
+            extra_match = re.search(r"(add|inv|ins|del|dup)\(", base_core)
+            if extra_match:
+                extra_component = extra_match.group(1)
+
         if decision is None and norm.startswith(("+", "-")):
             decision = apply_rule(
                 is_single_chr_deseq(norm, cnt_norm),
@@ -1181,6 +1189,9 @@ def calcul_score_iscn(
             and "Perte chromosomique implicite" in explication
         ):
             score = 1
+        if extra_component:
+            score += 1
+            explication = f"{explication} (+1 pour {extra_component})"
 
         total += score
         explication = append_uncertainty_note(anom, explication)

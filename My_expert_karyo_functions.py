@@ -1,6 +1,11 @@
 import re
 from collections import Counter
 import pandas as pd
+from dataclasses import dataclass
+
+# =========================
+# Parsing
+# =========================
 
 # Extraction des numéros de chromosome dans une anomalie ISCN
 def get_chromosomes(anom):
@@ -106,6 +111,9 @@ def display_clone_label(clone_name: str) -> str:
     return clone_name.capitalize()
 
 
+# =========================
+# Typage / Détection
+# =========================
 def is_repeat_notation(anom: str) -> bool:
     """Détecte les notations de répétition d'anomalies (idem, sl, sdl...)."""
     base = anom.strip().lower()
@@ -275,6 +283,9 @@ def type_anomalie(anom):
     return 'Autre'
 
 # Calcul des scores
+# =========================
+# Normalisation
+# =========================
 def normalize_anomaly(anom: str) -> str:
     """Normalise une anomalie pour le scoring.
 
@@ -283,6 +294,12 @@ def normalize_anomaly(anom: str) -> str:
     """
     norm = anom.lstrip('?')
     return norm
+
+
+def strip_sign(anom: str) -> str:
+    """Retire un signe initial + ou - sans modifier le reste."""
+
+    return anom[1:] if anom.startswith(("+", "-")) else anom
 
 
 def constitutional_status(norm: str) -> tuple[bool, str]:
@@ -310,6 +327,9 @@ def append_uncertainty_note(anom: str, explanation: str) -> str:
     return note
 
 
+# =========================
+# Anomalies implicites
+# =========================
 def detect_implicit_anomalies(anomalies):
     """Détecte les anomalies implicites et renvoie un dict.
 
@@ -446,6 +466,22 @@ def detect_implicit_anomalies(anomalies):
     return implicit
 
 
+# =========================
+# Scoring
+# =========================
+@dataclass(frozen=True)
+class RuleDecision:
+    rule_id: str
+    score: int
+    explanation: str
+
+
+def apply_rule(condition: bool, rule_id: str, score: int, explanation: str) -> RuleDecision | None:
+    if condition:
+        return RuleDecision(rule_id=rule_id, score=score, explanation=explanation)
+    return None
+
+
 def calcul_score_jondroville(anomalies):
     """Calcule le score global selon Jondreville 2020."""
 
@@ -454,29 +490,51 @@ def calcul_score_jondroville(anomalies):
     scores = {}
     explanations = {}
 
+    rule_ids = {}
+    rule_expls = {}
+
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
         # Ignorer les anomalies constitutionnelles (+Nc)
         is_constitutional, const_expl = constitutional_status(norm)
-        if is_constitutional:
-            score_per_occurrence = 0
-            explanation = const_expl
-        elif is_repeat_notation(norm):
-            score_per_occurrence = 0
-            explanation = "Anomalies déjà connues dans un autre clone"
-        elif norm.lower() == 'triploidy':
-            score_per_occurrence = 0
-            explanation = "Triploïdie ignorée dans le calcul"
-        else:
-            score_per_occurrence = 1  # Chaque anomalie non-constitutionnelle vaut 1 point
-            explanation = "Anomalie non constitutionnelle"
+        decision = apply_rule(
+            is_constitutional,
+            "JON.CONSTITUTIONAL",
+            0,
+            const_expl,
+        )
+        if decision is None:
+            decision = apply_rule(
+                is_repeat_notation(norm),
+                "JON.REPEAT_NOTATION",
+                0,
+                "Anomalies déjà connues dans un autre clone",
+            )
+        if decision is None:
+            decision = apply_rule(
+                norm.lower() == 'triploidy',
+                "JON.TRIPLOIDY",
+                0,
+                "Triploïdie ignorée dans le calcul",
+            )
+        if decision is None:
+            decision = RuleDecision(
+                rule_id="JON.DEFAULT",
+                score=1,  # Chaque anomalie non-constitutionnelle vaut 1 point
+                explanation="Anomalie non constitutionnelle",
+            )
+
+        score_per_occurrence = decision.score
+        explanation = decision.explanation
         explanation = append_uncertainty_note(anom, explanation)
         score = score_per_occurrence * cnt
         scores[anom] = score
         explanations[anom] = explanation
         total += score
+        rule_ids[anom] = decision.rule_id
+        rule_expls[anom] = decision.explanation
 
-    return scores, explanations, total
+    return scores, explanations, total, rule_ids, rule_expls
 
 
 def calcul_score_iscn(anomalies, clone_map):
@@ -489,81 +547,142 @@ def calcul_score_iscn(anomalies, clone_map):
     rows = []
     total = 0
 
+    rule_ids = {}
+    rule_expls = {}
+
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
+        base = strip_sign(norm)
         cnt_norm = norm_counts[norm]
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
         is_constitutional, const_expl = constitutional_status(norm)
-        if is_constitutional:
-            score = 0
-            explication = const_expl
+        decision = apply_rule(
+            is_constitutional,
+            "ISCN.CONSTITUTIONAL",
+            0,
+            const_expl,
+        )
 
-        elif is_repeat_notation(norm):
-            score = 0
-            explication = "Anomalies déjà connues dans un autre clone"
+        if decision is None:
+            decision = apply_rule(
+                is_repeat_notation(norm),
+                "ISCN.REPEAT_NOTATION",
+                0,
+                "Anomalies déjà connues dans un autre clone",
+            )
 
-        # b) Anomalies détectées comme implicites
-        elif norm in implicit_info:
-            info = implicit_info[norm]
-            score = 0
-            explication = f"{info['reason']} ({info['ref']})"
+        if decision is None:
+            if norm in implicit_info:
+                info = implicit_info[norm]
+                decision = RuleDecision(
+                    rule_id="ISCN.IMPLICIT",
+                    score=0,
+                    explanation=f"{info['reason']} ({info['ref']})",
+                )
 
-        # c) Gains/pertes simples (analyse standard si non implicite)
-        elif norm.startswith(("+", "-")):
-            if is_single_chr_deseq(norm, cnt_norm):
-                score = 2
-                explication = "Déséquilibre unichromosomique"
-            elif is_complex_multichr_deseq(norm):
-                score = 2
-                explication = "Déséquilibre multichromosomique complexe"
-            elif is_unbalanced_translocation(norm):
-                score = 2
-                explication = "Translocation déséquilibrée"
-            else:
-                score = 1
-                explication = "-"
+        if decision is None:
+            decision = apply_rule(
+                base.startswith('dic'),
+                "ISCN.DICENTRIC",
+                2,
+                "Chromosome dicentrique",
+            )
 
-        # d) Chromosomes dicentriques → 2 points
-        elif norm.startswith('dic'):
-            score = 2
-            explication = "Chromosome dicentrique"
-
-        # e) Chromosomes dérivés
-        elif norm.startswith('der'):
-            chroms = get_chromosomes(norm)
+        if decision is None and base.startswith('der'):
+            chroms = get_chromosomes(base)
             known = count_known_chromosomes(chroms)
             has_unknown = '?' in chroms
-            if norm.count('(') == 1:
-                score = 2
-                explication = "Chromosome dérivé non détaillé"
+            if base.count('(') == 1:
+                decision = RuleDecision(
+                    rule_id="ISCN.DER_UNDETAILLED",
+                    score=2,
+                    explanation="Chromosome dérivé non détaillé",
+                )
             elif known >= 2:
-                score = 2
-                if has_unknown and '?' in norm:
-                    explication = "Chromosome dérivé impliquant plusieurs chromosomes avec des imprécisions"
+                if has_unknown and '?' in base:
+                    decision = RuleDecision(
+                        rule_id="ISCN.DER_MULTI_UNCERTAIN",
+                        score=2,
+                        explanation="Chromosome dérivé impliquant plusieurs chromosomes avec des imprécisions",
+                    )
                 else:
-                    explication = "Chromosome dérivé impliquant plusieurs chromosomes"
+                    decision = RuleDecision(
+                        rule_id="ISCN.DER_MULTI",
+                        score=2,
+                        explanation="Chromosome dérivé impliquant plusieurs chromosomes",
+                    )
             elif has_unknown:
-                score = 1
-                explication = "Chromosome dérivé sans certitude sur un second chromosome"
+                decision = RuleDecision(
+                    rule_id="ISCN.DER_UNCERTAIN_SECOND",
+                    score=1,
+                    explanation="Chromosome dérivé sans certitude sur un second chromosome",
+                )
             else:
-                score = 1
-                explication = "Chromosome dérivé issu du même chromosome"
+                decision = RuleDecision(
+                    rule_id="ISCN.DER_SAME_CHR",
+                    score=1,
+                    explanation="Chromosome dérivé issu du même chromosome",
+                )
 
-        # f) Toutes les autres anomalies → scoring standard
-        else:
-            if is_single_chr_deseq(norm, cnt_norm):
-                score = 2
-                explication = "Déséquilibre unichromosomique"
-            elif is_complex_multichr_deseq(norm):
-                score = 2
-                explication = "Déséquilibre multichromosomique complexe"
-            elif is_unbalanced_translocation(norm):
-                score = 2
-                explication = "Translocation déséquilibrée"
-            else:
-                score = 1
-                explication = "-"
+        if decision is None and norm.startswith(("+", "-")):
+            decision = apply_rule(
+                is_single_chr_deseq(norm, cnt_norm),
+                "ISCN.SINGLE_CHR_DESEQ",
+                2,
+                "Déséquilibre unichromosomique",
+            )
+            if decision is None:
+                decision = apply_rule(
+                    is_complex_multichr_deseq(base),
+                    "ISCN.COMPLEX_MULTI_CHR",
+                    2,
+                    "Déséquilibre multichromosomique complexe",
+                )
+            if decision is None:
+                decision = apply_rule(
+                    is_unbalanced_translocation(base),
+                    "ISCN.UNBALANCED_TRANSLOCATION",
+                    2,
+                    "Translocation déséquilibrée",
+                )
+            if decision is None:
+                decision = RuleDecision(
+                    rule_id="ISCN.GAIN_LOSS_SIMPLE",
+                    score=1,
+                    explanation="-",
+                )
+
+        if decision is None:
+            decision = apply_rule(
+                is_single_chr_deseq(norm, cnt_norm),
+                "ISCN.SINGLE_CHR_DESEQ",
+                2,
+                "Déséquilibre unichromosomique",
+            )
+            if decision is None:
+                decision = apply_rule(
+                    is_complex_multichr_deseq(base),
+                    "ISCN.COMPLEX_MULTI_CHR",
+                    2,
+                    "Déséquilibre multichromosomique complexe",
+                )
+            if decision is None:
+                decision = apply_rule(
+                    is_unbalanced_translocation(base),
+                    "ISCN.UNBALANCED_TRANSLOCATION",
+                    2,
+                    "Translocation déséquilibrée",
+                )
+            if decision is None:
+                decision = RuleDecision(
+                    rule_id="ISCN.OTHER_STANDARD",
+                    score=1,
+                    explanation="-",
+                )
+
+        score = decision.score
+        explication = decision.explanation
 
         total += score
         explication = append_uncertainty_note(anom, explication)
@@ -576,6 +695,8 @@ def calcul_score_iscn(anomalies, clone_map):
             "Clones": ", ".join(clone_map.get(anom, [])),
             "Score ISCN 2024": score,
         })
+        rule_ids[anom] = decision.rule_id
+        rule_expls[anom] = decision.explanation
 
     # Ligne de totaux
     rows.append({
@@ -587,10 +708,53 @@ def calcul_score_iscn(anomalies, clone_map):
         "Score ISCN 2024": total,
     })
 
-    return pd.DataFrame(rows), total
+    return pd.DataFrame(rows), total, rule_ids, rule_expls
 
 # Fonction pour analyser une formule caryotypique
-def analyser_formule(formule):
+# =========================
+# Orchestration
+# =========================
+def deduplicate_inter_clones(entries):
+    """Déduplication inter-clones sans modifier la logique existante."""
+
+    first_clone_by_norm: dict[str, str] = {}
+    scorable_entries: list[dict[str, str]] = []
+    clone_details_map: dict[str, dict[str, dict[str, object]]] = {}
+
+    for entry in entries:
+        norm = normalize_anomaly(entry["anomaly"])
+        clone = entry["clone"]
+
+        if norm not in first_clone_by_norm:
+            first_clone_by_norm[norm] = clone
+        ref_clone = first_clone_by_norm[norm]
+        is_reference = clone == ref_clone
+
+        clone_bucket = clone_details_map.setdefault(entry["anomaly"], {})
+        bucket_entry = clone_bucket.setdefault(clone, {
+            "label": display_clone_label(clone),
+            "is_reference": is_reference,
+            "reason": "",
+            "count": 0,
+        })
+
+        bucket_entry["count"] = bucket_entry.get("count", 0) + 1
+
+        if not is_reference:
+            bucket_entry["is_reference"] = False
+            bucket_entry["reason"] = f"Anomalie déjà comptée dans {display_clone_label(ref_clone)}"
+
+        if is_reference:
+            scorable_entries.append(entry)
+
+    clone_details_ready = {
+        anom: list(clone_dict.values()) for anom, clone_dict in clone_details_map.items()
+    }
+
+    return scorable_entries, clone_details_ready
+
+
+def analyser_formule(formule, debug: bool = False):
     """
     Analyse une formule caryotypique et retourne:
     - Le DataFrame des anomalies détectées
@@ -603,40 +767,15 @@ def analyser_formule(formule):
         # Déduplication inter-clones: seule la première apparition d'une
         # anomalie (normalisée) est comptabilisée, les autres clones obtiennent
         # un score nul avec justification.
-        first_clone_by_norm: dict[str, str] = {}
-        scorable_entries: list[dict[str, str]] = []
-        clone_details_map: dict[str, dict[str, dict[str, object]]] = {}
-
-        for entry in entries:
-            norm = normalize_anomaly(entry["anomaly"])
-            clone = entry["clone"]
-
-            if norm not in first_clone_by_norm:
-                first_clone_by_norm[norm] = clone
-            ref_clone = first_clone_by_norm[norm]
-            is_reference = clone == ref_clone
-
-            clone_bucket = clone_details_map.setdefault(entry["anomaly"], {})
-            bucket_entry = clone_bucket.setdefault(clone, {
-                "label": display_clone_label(clone),
-                "is_reference": is_reference,
-                "reason": "",
-                "count": 0,
-            })
-
-            bucket_entry["count"] = bucket_entry.get("count", 0) + 1
-
-            if not is_reference:
-                bucket_entry["is_reference"] = False
-                bucket_entry["reason"] = f"Anomalie déjà comptée dans {display_clone_label(ref_clone)}"
-
-            if is_reference:
-                scorable_entries.append(entry)
-
+        scorable_entries, clone_details_ready = deduplicate_inter_clones(entries)
         scorable_anomalies = [entry["anomaly"] for entry in scorable_entries]
 
-        df_iscn, total_iscn = calcul_score_iscn(scorable_anomalies, clone_map)
-        jondroville_scores, jondroville_explanations, total_jondroville = calcul_score_jondroville(scorable_anomalies)
+        df_iscn, total_iscn, rule_id_iscn, rule_expl_iscn = calcul_score_iscn(
+            scorable_anomalies, clone_map
+        )
+        jondroville_scores, jondroville_explanations, total_jondroville, rule_id_jon, rule_expl_jon = calcul_score_jondroville(
+            scorable_anomalies
+        )
 
         df_iscn["Score Jondreville 2020"] = df_iscn["Anomalie"].apply(
             lambda anom: total_jondroville if anom == "TOTAL" else jondroville_scores.get(anom, 0)
@@ -646,13 +785,23 @@ def analyser_formule(formule):
             lambda anom: "" if anom == "TOTAL" else jondroville_explanations.get(anom, "Anomalie non constitutionnelle")
         )
 
-        clone_details_ready = {
-            anom: list(clone_dict.values()) for anom, clone_dict in clone_details_map.items()
-        }
-
         df_iscn["CloneDetails"] = df_iscn["Anomalie"].apply(
             lambda anom: [] if anom == "TOTAL" else clone_details_ready.get(anom, [])
         )
+
+        if debug:
+            df_iscn["RuleID_ISCN"] = df_iscn["Anomalie"].apply(
+                lambda anom: "" if anom == "TOTAL" else rule_id_iscn.get(anom, "")
+            )
+            df_iscn["RuleID_Jon"] = df_iscn["Anomalie"].apply(
+                lambda anom: "" if anom == "TOTAL" else rule_id_jon.get(anom, "")
+            )
+            df_iscn["RuleExplanation_ISCN"] = df_iscn["Anomalie"].apply(
+                lambda anom: "" if anom == "TOTAL" else rule_expl_iscn.get(anom, "")
+            )
+            df_iscn["RuleExplanation_Jon"] = df_iscn["Anomalie"].apply(
+                lambda anom: "" if anom == "TOTAL" else rule_expl_jon.get(anom, "")
+            )
 
         return df_iscn, {"iscn": total_iscn, "jondroville": total_jondroville}, None
     except Exception as e:

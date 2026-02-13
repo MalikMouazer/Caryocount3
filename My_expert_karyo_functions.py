@@ -850,6 +850,35 @@ def calcul_score_iscn(
         for anom in anoms:
             der_t_by_anom[anom] = t_str
 
+    def t_key_from_str(text: str) -> tuple[str, ...] | None:
+        m = re.match(r"^t\(([^)]*)\)", text, re.IGNORECASE)
+        if not m:
+            return None
+        chroms_raw = m.group(1)
+        chroms = [c.lstrip("?") for c in chroms_raw.split(";") if c]
+        if not chroms:
+            return None
+        return tuple(sorted(chroms))
+
+    def has_der_with_same_t(anom_str: str) -> bool:
+        key = t_key_from_str(anom_str)
+        if not key:
+            return False
+        anom_clones = set(clone_map.get(anom_str, []))
+        if not anom_clones:
+            return False
+        for der_anom, der_clones in clone_map.items():
+            if "der" not in der_anom:
+                continue
+            if not anom_clones.intersection(der_clones):
+                continue
+            base = strip_multiplicity(strip_sign(normalize_anomaly(der_anom)))
+            for m in re.finditer(r"t\(([^)]*)\)", base):
+                der_key = tuple(sorted([c.lstrip('?') for c in m.group(1).split(';') if c]))
+                if der_key == key:
+                    return True
+        return False
+
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
         base = strip_sign(norm)
@@ -889,6 +918,14 @@ def calcul_score_iscn(
                 "Anomalies déjà connues dans un autre clone",
             )
 
+        if decision is None and norm.startswith("t("):
+            if has_der_with_same_t(anom):
+                decision = RuleDecision(
+                    rule_id="ISCN.T_ALREADY_IN_DER",
+                    score=0,
+                    explanation="Translocation déjà comptée dans un dérivé",
+                )
+
         if decision is None:
             if norm in implicit_info:
                 info = implicit_info[norm]
@@ -899,18 +936,21 @@ def calcul_score_iscn(
                 )
 
         if decision is None and norm.startswith("+"):
-            if base_core.startswith("i(") or base_core.startswith("del"):
+            if base_core.startswith("i(") or base_core.startswith("del") or base_core.startswith("der"):
                 chroms = get_chromosomes(base_core)
                 chr_label = chroms and sorted(chroms)[0] or ""
                 if base_core.startswith("i("):
                     expl = "Équivalence sémantique: +i(...) = +chr + i(...)"
-                else:
+                elif base_core.startswith("del"):
                     expl = "Équivalence sémantique: +del(...) = +chr + del(...)"
+                else:
+                    expl = "Équivalence sémantique: +der(...) = +chr + der(...)"
                 if chr_label:
                     expl = f"{expl} (chr {chr_label})"
+                score_value = 3 if base_core.startswith("der") else 2
                 decision = RuleDecision(
                     rule_id="ISCN.SEMANTIC_PLUS_STRUCT",
-                    score=2,
+                    score=score_value,
                     explanation=expl,
                 )
 
@@ -1134,6 +1174,19 @@ def deduplicate_inter_clones(entries):
                         return False
                     for prev in first_clone_by_norm.keys():
                         if prev.startswith(base):
+                            return True
+                    return False
+                if stripped_norm.startswith(("der", "dic")):
+                    m = re.match(r"^(der|dic)\(([^)]*)\)(?:t\(([^)]*)\))?", stripped_norm, re.IGNORECASE)
+                    if not m:
+                        return False
+                    kind, der_chr, t_chr = m.groups()
+                    for prev in first_clone_by_norm.keys():
+                        pm = re.match(rf"^{kind}\(([^)]*)\)(?:t\(([^)]*)\))?", prev, re.IGNORECASE)
+                        if not pm:
+                            continue
+                        p_der, p_t = pm.groups()
+                        if p_der == der_chr and (t_chr is None or p_t == t_chr):
                             return True
                     return False
                 return stripped_norm in first_clone_by_norm

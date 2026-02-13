@@ -283,8 +283,8 @@ Cette application permet d'analyser des formules caryotypiques (notation ISCN) p
 - Comparer le comptage automatique avec un comptage manuel (si disponible)
 """)
 
-# Création des onglets
-tab1, tab2 = st.tabs(["Analyse d'une formule", "Analyse d'un fichier"])
+# Création des onglets (par défaut: analyse d'un fichier)
+tab2, tab1 = st.tabs(["Analyse d'un fichier", "Analyse d'une formule"])
 
 # Onglet 1: Analyse d'une formule
 with tab1:

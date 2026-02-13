@@ -67,6 +67,7 @@ def parse_caryotype(chaine_iscn):
     for idx, clone in enumerate(clones, start=1):
         clone_name = f"clone{idx}"
         parts = [p.strip().strip('.') for p in clone.split(',') if p.strip()]
+        clone_has_repeat = any(is_repeat_notation(p) for p in parts)
         # Détection de la ploidie
         try:
             ploidy_token = parts[0]
@@ -97,7 +98,12 @@ def parse_caryotype(chaine_iscn):
             count = anomaly_occurrences(an)
             anomalies.extend([an] * count)
             clone_map.setdefault(an, []).append(clone_name)
-            entries.append({"anomaly": an, "clone": clone_name, "count": count})
+            entries.append({
+                "anomaly": an,
+                "clone": clone_name,
+                "count": count,
+                "repeat_clone": clone_has_repeat,
+            })
     return anomalies, clone_map, entries
 
 
@@ -253,6 +259,29 @@ def type_anomalie(anom):
             return "Isochromosome"
         if base.startswith("t("):
             return "Translocation"
+    if is_negative_anomaly(anom):
+        if base.startswith("del"):
+            return "Délétion"
+        if base.startswith("dup"):
+            return "Duplication"
+        if base.startswith("inv"):
+            return "Inversion"
+        if base.startswith("ins"):
+            return "Insertion"
+        if base.startswith("add"):
+            return "Addition"
+        if base.startswith("der"):
+            return "Chromosome dérivé"
+        if base.startswith("dic"):
+            return "Chromosome dicentrique"
+        if base.startswith("idic"):
+            return "Isodicentric chromosome"
+        if base.startswith("ider"):
+            return "Isoderivative chromosome"
+        if base.startswith("i(") or "iso" in base:
+            return "Isochromosome"
+        if base.startswith("t("):
+            return "Translocation"
     if is_marker_anomaly(anom):
         m = re.match(r'^mar(\d+)$', base)
         suffix = m.group(1) if m else ""
@@ -331,7 +360,19 @@ def normalize_anomaly(anom: str) -> str:
 def strip_sign(anom: str) -> str:
     """Retire un signe initial + ou - sans modifier le reste."""
 
-    return anom[1:] if anom.startswith(("+", "-")) else anom
+    return anom[1:] if anom.startswith(("+", "-", "−")) else anom
+
+
+def is_negative_anomaly(anom: str) -> bool:
+    """Indique si l'anomalie commence par un signe négatif (ASCII ou Unicode)."""
+
+    return anom.startswith(("-", "−"))
+
+
+def strip_negative(anom: str) -> str:
+    """Retire un signe négatif initial (ASCII ou Unicode) sans modifier le reste."""
+
+    return anom[1:] if is_negative_anomaly(anom) else anom
 
 
 def strip_multiplicity(anom: str) -> str:
@@ -580,7 +621,7 @@ def apply_rule(condition: bool, rule_id: str, score: int, explanation: str) -> R
     return None
 
 
-def calcul_score_jondroville(anomalies, clone_map, entries=None):
+def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons: dict[str, tuple[int, str]] | None = None):
     """Calcule le score global selon Jondreville 2020."""
 
     def jon_dedup_key(anom: str) -> str:
@@ -626,12 +667,23 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None):
                 eff_cnt = max(cnt // 2, 1)
         # Ignorer les anomalies constitutionnelles (+Nc)
         is_constitutional, const_expl = constitutional_status(norm)
-        decision = apply_rule(
-            is_constitutional,
-            "JON.CONSTITUTIONAL",
-            0,
-            const_expl,
-        )
+        zeroed_entry = None
+        if zeroed_reasons:
+            zeroed_entry = zeroed_reasons.get(anom) or zeroed_reasons.get(normalize_anomaly(anom))
+        if zeroed_entry:
+            override_score, reason = zeroed_entry
+            decision = RuleDecision(
+                rule_id="JON.ABSENT_IN_REPEAT",
+                score=override_score,
+                explanation=reason,
+            )
+        else:
+            decision = apply_rule(
+                is_constitutional,
+                "JON.CONSTITUTIONAL",
+                0,
+                const_expl,
+            )
         if decision is None:
             decision = apply_rule(
                 is_repeat_notation(norm),
@@ -666,6 +718,11 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None):
             explanation = jon_dup_expl[anom]
         explanation = append_uncertainty_note(anom, explanation)
         score = score_per_occurrence * eff_cnt
+        if decision.rule_id == "JON.ABSENT_IN_REPEAT":
+            if decision.score == 1:
+                score = 1
+            elif "Perte chromosomique implicite" in explanation:
+                score = 1
         scores[anom] = score
         explanations[anom] = explanation
         total += score
@@ -678,6 +735,7 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None):
 def calcul_score_iscn(
     anomalies,
     clone_map,
+    zeroed_reasons: dict[str, tuple[int, str]] | None = None,
 ):
     """Calcule le détail des scores selon la grille ISCN 2024."""
 
@@ -750,12 +808,23 @@ def calcul_score_iscn(
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
         is_constitutional, const_expl = constitutional_status(norm)
-        decision = apply_rule(
-            is_constitutional,
-            "ISCN.CONSTITUTIONAL",
-            0,
-            const_expl,
-        )
+        zeroed_entry = None
+        if zeroed_reasons:
+            zeroed_entry = zeroed_reasons.get(anom) or zeroed_reasons.get(normalize_anomaly(anom))
+        if zeroed_entry:
+            override_score, reason = zeroed_entry
+            decision = RuleDecision(
+                rule_id="ISCN.ABSENT_IN_REPEAT",
+                score=override_score,
+                explanation=reason,
+            )
+        else:
+            decision = apply_rule(
+                is_constitutional,
+                "ISCN.CONSTITUTIONAL",
+                0,
+                const_expl,
+            )
 
         if decision is None:
             decision = apply_rule(
@@ -909,6 +978,8 @@ def calcul_score_iscn(
         score = decision.score
         explication = decision.explanation
         score_multiplier = eff_cnt
+        if decision.rule_id == "ISCN.ABSENT_IN_REPEAT" and decision.score == 1:
+            score_multiplier = 1
         if (
             decision.rule_id == "ISCN.SINGLE_CHR_DESEQ"
             and norm.startswith("+")
@@ -917,6 +988,11 @@ def calcul_score_iscn(
             score_multiplier = 1
             explication = f"{explication} (gain répété : {anom})"
         score = decision.score * score_multiplier
+        if (
+            decision.rule_id == "ISCN.ABSENT_IN_REPEAT"
+            and "Perte chromosomique implicite" in explication
+        ):
+            score = 1
 
         total += score
         explication = append_uncertainty_note(anom, explication)
@@ -956,11 +1032,13 @@ def deduplicate_inter_clones(entries):
     clone_details_map: dict[str, dict[str, dict[str, object]]] = {}
     marker_suppressed: dict[str, set[str]] = {}
     marker_ref_counts: dict[str, int] = {}
+    zeroed_reasons: dict[str, tuple[int, str]] = {}
     for entry in entries:
         raw_anom = entry["anomaly"]
         norm = normalize_anomaly(raw_anom)
         clone = entry["clone"]
         count = int(entry.get("count", 1))
+        is_repeat_clone = bool(entry.get("repeat_clone"))
         is_marker = is_marker_anomaly(norm)
         key_for_ref = strip_multiplicity(norm) if is_marker else raw_anom
 
@@ -977,11 +1055,52 @@ def deduplicate_inter_clones(entries):
                 "is_reference": is_ref,
                 "reason": reason,
                 "count": 0,
+                "score_override": None,
             })
             return bucket_entry
 
         suppressed_one = False
         scorable_count = count if is_reference else 0
+        if is_repeat_clone and is_negative_anomaly(raw_anom):
+            stripped = strip_negative(raw_anom)
+            stripped_norm = normalize_anomaly(strip_sign(stripped))
+
+            def _matches_previous() -> bool:
+                if is_marker_anomaly(stripped_norm):
+                    target = strip_sign(stripped_norm)
+                    for prev in first_clone_by_norm.keys():
+                        if is_marker_anomaly(prev) and strip_sign(prev) == target:
+                            return True
+                    return False
+                if stripped_norm.startswith(("add", "del", "dup", "ins", "inv")):
+                    try:
+                        base = stripped_norm.split("(")[0] + "(" + stripped_norm.split("(")[1].split(")")[0] + ")"
+                    except IndexError:
+                        return False
+                    for prev in first_clone_by_norm.keys():
+                        if prev.startswith(base):
+                            return True
+                    return False
+                return stripped_norm in first_clone_by_norm
+
+            if _matches_previous():
+                reason = f"Anomalie indiquée absente dans {display_clone_label(clone)} (déjà comptée)"
+                score_override = 0
+                if stripped_norm.startswith(("der", "dic", "add")):
+                    reason = f"Perte chromosomique implicite dans {display_clone_label(clone)}"
+                    score_override = 1
+                elif stripped_norm.startswith("r("):
+                    if re.search(r"r\(\s*\d+", stripped_norm):
+                        reason = f"Perte chromosomique implicite dans {display_clone_label(clone)}"
+                        score_override = 1
+                bucket_entry = get_bucket(clone, False, reason)
+                bucket_entry["count"] = bucket_entry.get("count", 0) + count
+                bucket_entry["score_override"] = score_override
+                zeroed_reasons[raw_anom] = (score_override, reason)
+                zeroed_reasons[normalize_anomaly(raw_anom)] = (score_override, reason)
+                for _ in range(count):
+                    scorable_entries.append(entry)
+                continue
         if is_reference and is_marker:
             marker_ref_counts.setdefault(key_for_ref, count)
         if not is_reference and is_marker:
@@ -1009,7 +1128,7 @@ def deduplicate_inter_clones(entries):
         anom: list(clone_dict.values()) for anom, clone_dict in clone_details_map.items()
     }
 
-    return scorable_entries, clone_details_ready
+    return scorable_entries, clone_details_ready, zeroed_reasons
 
 
 def analyser_formule(formule, debug: bool = False):
@@ -1025,14 +1144,14 @@ def analyser_formule(formule, debug: bool = False):
         # Déduplication inter-clones: seule la première apparition d'une
         # anomalie (normalisée) est comptabilisée, les autres clones obtiennent
         # un score nul avec justification.
-        scorable_entries, clone_details_ready = deduplicate_inter_clones(entries)
+        scorable_entries, clone_details_ready, zeroed_reasons = deduplicate_inter_clones(entries)
         scorable_anomalies = [entry["anomaly"] for entry in scorable_entries]
 
         df_iscn, total_iscn, rule_id_iscn, rule_expl_iscn = calcul_score_iscn(
-            scorable_anomalies, clone_map
+            scorable_anomalies, clone_map, zeroed_reasons
         )
         jondroville_scores, jondroville_explanations, total_jondroville, rule_id_jon, rule_expl_jon = calcul_score_jondroville(
-            scorable_anomalies, clone_map, scorable_entries
+            scorable_anomalies, clone_map, scorable_entries, zeroed_reasons
         )
 
         df_iscn["Score Jondreville 2020"] = df_iscn["Anomalie"].apply(

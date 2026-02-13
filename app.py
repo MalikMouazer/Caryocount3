@@ -174,7 +174,13 @@ def format_anomalies_compact(anomalies_df):
             reason_html = clean_text(reason_raw) if reason_raw else ''
             count = detail.get('count', 1)
 
-            if is_reference:
+            score_override = detail.get('score_override')
+            if score_override is not None:
+                line_score_iscn = score_override
+                line_score_jon = score_override
+                line_exp_iscn = reason_html or explication_iscn
+                line_exp_jon = reason_html or explication_jon
+            elif is_reference:
                 line_score_iscn = score_iscn
                 line_exp_iscn = explication_iscn
                 line_score_jon = score_jon
@@ -450,10 +456,17 @@ with tab2:
                                 clone_label = detail.get('label') if multiple_clones else ''
                                 count = detail.get('count', 1)
 
-                                line_score_iscn = row_detail['Score ISCN 2024'] if is_reference else 0
-                                line_exp_iscn = exp_iscn if is_reference else (reason or exp_iscn)
-                                line_score_jon = row_detail['Score Jondreville 2020'] if is_reference else 0
-                                line_exp_jon = exp_jon if is_reference else (reason or exp_jon)
+                                score_override = detail.get('score_override')
+                                if score_override is not None:
+                                    line_score_iscn = score_override
+                                    line_score_jon = score_override
+                                    line_exp_iscn = reason or exp_iscn
+                                    line_exp_jon = reason or exp_jon
+                                else:
+                                    line_score_iscn = row_detail['Score ISCN 2024'] if is_reference else 0
+                                    line_exp_iscn = exp_iscn if is_reference else (reason or exp_iscn)
+                                    line_score_jon = row_detail['Score Jondreville 2020'] if is_reference else 0
+                                    line_exp_jon = exp_jon if is_reference else (reason or exp_jon)
 
                                 prefix = f"{clone_label}: " if clone_label else ""
                                 label_with_count = f"{type_label} x{count}" if count > 1 else type_label

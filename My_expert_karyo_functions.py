@@ -823,14 +823,45 @@ def calcul_score_iscn(
     def has_extra_der_components(anom_str: str) -> bool:
         return bool(re.search(r"(add|del|dup|ins|inv|r\()", anom_str))
 
+    def t_keys_in_str(anom_str: str) -> set[tuple[str, ...]]:
+        keys: set[tuple[str, ...]] = set()
+        for m in re.finditer(r"t\(([^)]*)\)", anom_str, re.IGNORECASE):
+            chroms = [c.lstrip("?") for c in m.group(1).split(";") if c]
+            if not chroms:
+                continue
+            keys.add(tuple(sorted(chroms)))
+        return keys
+
     der_t_map: dict[tuple[str, ...], dict[str, object]] = {}
     der_t_by_anom: dict[str, str] = {}
+    der_t_any: dict[str, set[tuple[str, ...]]] = {}
+    ider_t_any: dict[str, set[tuple[str, ...]]] = {}
+    balanced_t_keys: dict[tuple[str, ...], list[str]] = {}
+
+    def t_key_from_str(text: str) -> tuple[str, ...] | None:
+        m = re.match(r"^t\(([^)]*)\)", text, re.IGNORECASE)
+        if not m:
+            return None
+        chroms_raw = m.group(1)
+        chroms = [c.lstrip("?") for c in chroms_raw.split(";") if c]
+        if not chroms:
+            return None
+        return tuple(sorted(chroms))
     for anom in counts:
         norm = normalize_anomaly(anom)
         base = strip_sign(norm)
         base_core = strip_multiplicity(base)
-        if not base_core.startswith("der"):
+        if not base_core.startswith(("der", "ider")):
             continue
+        t_keys = t_keys_in_str(base_core)
+        if not t_keys:
+            continue
+        if base_core.startswith("ider"):
+            ider_t_any[anom] = t_keys
+        else:
+            der_t_any[anom] = t_keys
+        for key in t_keys:
+            balanced_t_keys.setdefault(key, []).append(anom)
         for entry in extract_t_entries(base_core):
             key = entry["key"]
             bp = entry["bp"]
@@ -850,15 +881,19 @@ def calcul_score_iscn(
         for anom in anoms:
             der_t_by_anom[anom] = t_str
 
-    def t_key_from_str(text: str) -> tuple[str, ...] | None:
-        m = re.match(r"^t\(([^)]*)\)", text, re.IGNORECASE)
-        if not m:
-            return None
-        chroms_raw = m.group(1)
-        chroms = [c.lstrip("?") for c in chroms_raw.split(";") if c]
-        if not chroms:
-            return None
-        return tuple(sorted(chroms))
+    # équilibrée si au moins un der est présent + un autre der ou ider
+    balanced_t_keys = {
+        k: v
+        for k, v in balanced_t_keys.items()
+        if len(v) >= 2 and any(a in der_t_any for a in v)
+    }
+    explicit_t_keys = {
+        t_key_from_str(normalize_anomaly(a))
+        for a in anomalies
+        if normalize_anomaly(a).startswith("t(")
+    }
+    explicit_t_keys.discard(None)
+    counted_t_keys: set[tuple[str, ...]] = set()
 
     def has_der_with_same_t(anom_str: str) -> bool:
         key = t_key_from_str(anom_str)
@@ -873,7 +908,7 @@ def calcul_score_iscn(
             if not anom_clones.intersection(der_clones):
                 continue
             base = strip_multiplicity(strip_sign(normalize_anomaly(der_anom)))
-            for m in re.finditer(r"t\(([^)]*)\)", base):
+            for m in re.finditer(r"t\(([^)]*)\)", base, re.IGNORECASE):
                 der_key = tuple(sorted([c.lstrip('?') for c in m.group(1).split(';') if c]))
                 if der_key == key:
                     return True
@@ -919,7 +954,15 @@ def calcul_score_iscn(
             )
 
         if decision is None and norm.startswith("t("):
-            if has_der_with_same_t(anom):
+            tkey = t_key_from_str(norm)
+            if tkey and tkey in balanced_t_keys:
+                decision = RuleDecision(
+                    rule_id="ISCN.BALANCED_T",
+                    score=1,
+                    explanation="Translocation équilibrée (dérivés réciproques)",
+                )
+                counted_t_keys.add(tkey)
+            elif has_der_with_same_t(anom):
                 decision = RuleDecision(
                     rule_id="ISCN.T_ALREADY_IN_DER",
                     score=0,
@@ -969,6 +1012,24 @@ def calcul_score_iscn(
                 2,
                 "Chromosome dicentrique",
             )
+
+        if decision is None and base_core.startswith('der'):
+            t_keys = der_t_any.get(anom, set())
+            balanced_key = next((k for k in t_keys if k in balanced_t_keys), None)
+            if balanced_key:
+                if balanced_key not in explicit_t_keys and balanced_key not in counted_t_keys:
+                    decision = RuleDecision(
+                        rule_id="ISCN.BALANCED_T_VIA_DER",
+                        score=1,
+                        explanation="Translocation équilibrée (comptée via dérivé)",
+                    )
+                    counted_t_keys.add(balanced_key)
+                else:
+                    decision = RuleDecision(
+                        rule_id="ISCN.DER_BALANCED_T",
+                        score=0,
+                        explanation="Dérivé associé à une translocation équilibrée",
+                    )
 
         if decision is None and base_core.startswith('der'):
             if anom in der_t_by_anom and not has_extra_der_components(base_core):

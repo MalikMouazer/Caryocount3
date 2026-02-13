@@ -8,7 +8,6 @@ index,formule,iscn_status,jon_status,erreur
 79,"48,XX,i(17)(q10),+mar1,+mar2[17]/51,XX,i(17)(q10),+mar1×3,+mar2,+mar3",ISCN False 5 au lieu de 6,Jon False 5 au lieu de 6,
 80,"49,XY,+3mar,∼14dmin",ISCN False 2 au lieu de 4,Jon False 2 au lieu de 4,
 86,"44,XY,–1,der(1;3)(p10;q10)",ISCN False 3 au lieu de 2,Jon ok 2/2,
-87,"92,XXXX,t(8;14)(q24.1;q32)×2",ISCN False 3 au lieu de 2,Jon ok 2/2,
 88,"48,XY,+del(6)(q13q23)×2",ISCN False 1 au lieu de 4,Jon False 1 au lieu de 2,
 89,"48,XY,+6,+6,del(6)(q13q23)×2",ISCN False 3 au lieu de 4,Jon False 3 au lieu de 4,
 90,"47,XX,+8,i(8)(q10)×2",ISCN False 2 au lieu de 3,Jon False 2 au lieu de 3,

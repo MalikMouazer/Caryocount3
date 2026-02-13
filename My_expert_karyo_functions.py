@@ -302,6 +302,22 @@ def strip_sign(anom: str) -> str:
     return anom[1:] if anom.startswith(("+", "-")) else anom
 
 
+def strip_multiplicity(anom: str) -> str:
+    """Retire un suffixe de multiplicité (xN ou ×N) sans modifier le reste."""
+
+    return re.sub(r"(?:x|×)\d+$", "", anom)
+
+
+def is_tetraploid_context(anom: str, clone_map: dict[str, list[str]]) -> bool:
+    """Indique si l'anomalie appartient à un clone en tétraploïdie."""
+
+    tetrap_clones = set(clone_map.get("Tetraploidy", []))
+    if not tetrap_clones:
+        return False
+    anom_clones = set(clone_map.get(anom, []))
+    return bool(tetrap_clones & anom_clones)
+
+
 def constitutional_status(norm: str) -> tuple[bool, str]:
     """Indique si ``norm`` correspond à une anomalie constitutionnelle."""
 
@@ -550,9 +566,56 @@ def calcul_score_iscn(anomalies, clone_map):
     rule_ids = {}
     rule_expls = {}
 
+    # Détection des translocations équilibrées sous forme de dérivés "pairés"
+    def extract_t_entries(anom_str: str):
+        entries = []
+        for m in re.finditer(r"t\(([^)]*)\)(?:\(([^)]*)\))?", anom_str):
+            chroms_raw = m.group(1)
+            bp_raw = m.group(2)
+            chroms = [c.lstrip("?") for c in chroms_raw.split(";") if c]
+            if not chroms:
+                continue
+            key = tuple(sorted(chroms))
+            t_str = f"t({chroms_raw})"
+            if bp_raw:
+                t_str = f"{t_str}({bp_raw})"
+            entries.append({"key": key, "bp": bp_raw, "t_str": t_str})
+        return entries
+
+    def has_extra_der_components(anom_str: str) -> bool:
+        return bool(re.search(r"(add|del|dup|ins|inv|r\()", anom_str))
+
+    der_t_map: dict[tuple[str, ...], dict[str, object]] = {}
+    der_t_by_anom: dict[str, str] = {}
+    for anom in counts:
+        norm = normalize_anomaly(anom)
+        base = strip_sign(norm)
+        base_core = strip_multiplicity(base)
+        if not base_core.startswith("der"):
+            continue
+        for entry in extract_t_entries(base_core):
+            key = entry["key"]
+            bp = entry["bp"]
+            bucket = der_t_map.setdefault(key, {"bp": bp, "anoms": [], "t_str": entry["t_str"]})
+            if bucket["bp"] is None and bp:
+                bucket["bp"] = bp
+                bucket["t_str"] = entry["t_str"]
+            if bp and bucket["bp"] and bp != bucket["bp"]:
+                continue
+            bucket["anoms"].append(anom)
+
+    for _, bucket in der_t_map.items():
+        anoms = bucket["anoms"]
+        if len(anoms) < 2:
+            continue
+        t_str = bucket["t_str"]
+        for anom in anoms:
+            der_t_by_anom[anom] = t_str
+
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
         base = strip_sign(norm)
+        base_core = strip_multiplicity(base) if is_tetraploid_context(anom, clone_map) else base
         cnt_norm = norm_counts[norm]
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
@@ -583,24 +646,32 @@ def calcul_score_iscn(anomalies, clone_map):
 
         if decision is None:
             decision = apply_rule(
-                base.startswith('dic'),
+                base_core.startswith('dic'),
                 "ISCN.DICENTRIC",
                 2,
                 "Chromosome dicentrique",
             )
 
-        if decision is None and base.startswith('der'):
-            chroms = get_chromosomes(base)
+        if decision is None and base_core.startswith('der'):
+            if anom in der_t_by_anom and not has_extra_der_components(base_core):
+                decision = RuleDecision(
+                    rule_id="ISCN.DER_BALANCED_T",
+                    score=0,
+                    explanation=f"Dérivé issu d'une translocation équilibrée ({der_t_by_anom[anom]})",
+                )
+
+        if decision is None and base_core.startswith('der'):
+            chroms = get_chromosomes(base_core)
             known = count_known_chromosomes(chroms)
             has_unknown = '?' in chroms
-            if base.count('(') == 1:
+            if base_core.count('(') == 1:
                 decision = RuleDecision(
                     rule_id="ISCN.DER_UNDETAILLED",
                     score=2,
                     explanation="Chromosome dérivé non détaillé",
                 )
             elif known >= 2:
-                if has_unknown and '?' in base:
+                if has_unknown and '?' in base_core:
                     decision = RuleDecision(
                         rule_id="ISCN.DER_MULTI_UNCERTAIN",
                         score=2,
@@ -634,14 +705,14 @@ def calcul_score_iscn(anomalies, clone_map):
             )
             if decision is None:
                 decision = apply_rule(
-                    is_complex_multichr_deseq(base),
+                    is_complex_multichr_deseq(base_core),
                     "ISCN.COMPLEX_MULTI_CHR",
                     2,
                     "Déséquilibre multichromosomique complexe",
                 )
             if decision is None:
                 decision = apply_rule(
-                    is_unbalanced_translocation(base),
+                    is_unbalanced_translocation(base_core),
                     "ISCN.UNBALANCED_TRANSLOCATION",
                     2,
                     "Translocation déséquilibrée",
@@ -662,14 +733,14 @@ def calcul_score_iscn(anomalies, clone_map):
             )
             if decision is None:
                 decision = apply_rule(
-                    is_complex_multichr_deseq(base),
+                    is_complex_multichr_deseq(base_core),
                     "ISCN.COMPLEX_MULTI_CHR",
                     2,
                     "Déséquilibre multichromosomique complexe",
                 )
             if decision is None:
                 decision = apply_rule(
-                    is_unbalanced_translocation(base),
+                    is_unbalanced_translocation(base_core),
                     "ISCN.UNBALANCED_TRANSLOCATION",
                     2,
                     "Translocation déséquilibrée",

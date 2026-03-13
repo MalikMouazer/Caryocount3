@@ -7,4 +7,3 @@ index,formule,iscn_status,jon_status,erreur
 63,"45,XX,der(8;8)(q10;q10)del(8)(q22)t(8;9)(q24.1;q12)",ISCN False 3 au lieu de 2,Jon ok 1/1,
 70,"46,XY,der(1)del(1)(p33p21)hsr(1)(p33)[10]",ISCN False 2 au lieu de 1,Jon ok 1/1,
 73,"46,XX,der(5)ins(5;2)(p14;q32q22)",ISCN False 3 au lieu de 2,Jon ok 1/1,
-86,"44,XY,–1,der(1;3)(p10;q10)",ISCN False 3 au lieu de 2,Jon ok 2/2,

@@ -931,6 +931,20 @@ def calcul_score_iscn(
             explicit_t_keys_by_clone.setdefault(clone, set()).add(tkey)
     counted_t_keys: dict[str, set[tuple[str, ...]]] = {}
 
+    def has_balanced_mirror_der(anom_str: str) -> bool:
+        t_keys = der_t_any.get(anom_str, set())
+        if not t_keys:
+            return False
+        chroms = get_chromosomes(strip_multiplicity(strip_sign(normalize_anomaly(anom_str))))
+        known_chroms = {chrom for chrom in chroms if chrom != "?"}
+        if len(known_chroms) < 2:
+            return False
+        for clone in clone_map.get(anom_str, []):
+            for t_key in t_keys:
+                if t_key in balanced_t_keys_by_clone.get(clone, {}):
+                    return True
+        return False
+
     def has_der_with_same_t(anom_str: str) -> bool:
         key = t_key_from_str(anom_str)
         if not key:
@@ -1147,7 +1161,7 @@ def calcul_score_iscn(
         extra_der_gain = False
         if base_core.startswith("der"):
             extra_match = re.search(r"(add|inv|ins|del|dup)\(", base_core)
-            if extra_match:
+            if extra_match and has_balanced_mirror_der(anom):
                 extra_component = extra_match.group(1)
             if norm.startswith("+"):
                 extra_der_gain = True

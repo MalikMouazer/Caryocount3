@@ -16,6 +16,9 @@ openpyxl/
 *.log
 *.tmp
 
+# Donnees locales confidentielles
+comptage_local_MYC.xlsx
+
 # IDE / OS
 .vscode/
 .idea/

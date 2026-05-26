@@ -1,9 +1,1 @@
-index,formule,iscn_status,jon_status,erreur
-9,"46,XY,der(7)del(7)(p15)del(7)(q32)[20]",ISCN False 2 au lieu de 1,Jon ok 1/1,
-21,"46,XY,der(22)ins(22;9)(q11.2;q34q34)del(22)(q13)[20]",ISCN False 3 au lieu de 2,Jon ok 1/1,
-58,"46,XY,der(9)inv(9)(p23p13)del(9)(q22q33)",ISCN False 2 au lieu de 1,Jon ok 1/1,
-61,"46,XX,der(1)del(1)(p34p22)ins(1;17)(p34;q25q11.2)",ISCN False 3 au lieu de 2,Jon ok 1/1,
-62,"46,XY,der(7)ins(7;?)(q22;?)t(2;7)(q21;q22)",ISCN False 3 au lieu de 2,Jon ok 1/1,
-63,"45,XX,der(8;8)(q10;q10)del(8)(q22)t(8;9)(q24.1;q12)",ISCN False 3 au lieu de 2,Jon ok 1/1,
-70,"46,XY,der(1)del(1)(p33p21)hsr(1)(p33)[10]",ISCN False 2 au lieu de 1,Jon ok 1/1,
-73,"46,XX,der(5)ins(5;2)(p14;q32q22)",ISCN False 3 au lieu de 2,Jon ok 1/1,
+

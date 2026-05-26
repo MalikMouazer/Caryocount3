@@ -5,7 +5,23 @@ import base64
 import io
 import html
 import openpyxl
+from pathlib import Path
 from My_expert_karyo_functions import analyser_formule
+
+LOCAL_TEST_FILENAME = "comptage_local_MYC.xlsx"
+LOCAL_TEST_PATH = Path(__file__).resolve().parent / LOCAL_TEST_FILENAME
+TEST_SHEET_URL = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1_QPAzEr3PNHaNVu8Qxuv_hWCUoBQqqRcNSnX-Q0Egm8/edit?gid=98233212#gid=98233212"
+)
+
+# Configuration de la page
+st.set_page_config(
+    page_title="Analyseur de Caryotypes",
+    page_icon="🧬",
+    layout="wide"
+)
+
 # Utilitaire pour charger une feuille Google Sheets publique
 def load_google_sheet(url_or_id):
     """Charge une feuille Google Sheets publique en DataFrame.
@@ -43,12 +59,113 @@ def load_google_sheet(url_or_id):
         return None, str(e)
 
 
-# Configuration de la page
-st.set_page_config(
-    page_title="Analyseur de Caryotypes",
-    page_icon="🧬",
-    layout="wide"
-)
+def detect_input_columns(df):
+    formule_col = None
+    for col in df.columns:
+        if str(col).strip().lower() == 'formule':
+            formule_col = col
+            break
+
+    count_i_col = None
+    count_j_col = None
+    for col in df.columns:
+        norm = str(col).strip().lower()
+        if norm in ('count_i', 'count_iscn'):
+            count_i_col = col
+        elif norm in ('count_j', 'count_jon'):
+            count_j_col = col
+
+    return formule_col, count_i_col, count_j_col
+
+
+def normalize_reference_value(value):
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        try:
+            numeric = float(trimmed)
+            if numeric.is_integer():
+                return int(numeric)
+            return numeric
+        except ValueError:
+            return trimmed
+    if pd.isna(value):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def compute_match_preview(df):
+    formule_col, count_i_col, count_j_col = detect_input_columns(df)
+    if formule_col is None:
+        return None
+
+    total_i = 0
+    ok_i = 0
+    total_j = 0
+    ok_j = 0
+    errors = 0
+
+    for _, row in df.iterrows():
+        _, totals, error = analyser_formule(row[formule_col])
+        if error:
+            errors += 1
+            continue
+
+        if count_i_col:
+            ref_i = normalize_reference_value(row[count_i_col])
+            if ref_i is not None:
+                total_i += 1
+                ok_i += int(totals.get("iscn") == ref_i)
+        if count_j_col:
+            ref_j = normalize_reference_value(row[count_j_col])
+            if ref_j is not None:
+                total_j += 1
+                ok_j += int(totals.get("jondroville") == ref_j)
+
+    return {
+        "errors": errors,
+        "iscn": round(ok_i / total_i * 100) if total_i else None,
+        "jon": round(ok_j / total_j * 100) if total_j else None,
+    }
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def load_google_sheet_preview(url):
+    df, err = load_google_sheet(url)
+    if err:
+        return None, err
+    return compute_match_preview(df), None
+
+
+@st.cache_data(show_spinner=False)
+def load_local_sheet_preview(path, mtime):
+    df = pd.read_excel(path)
+    return compute_match_preview(df)
+
+
+def preview_button_label(title, preview=None, missing_text=None):
+    if missing_text:
+        return f"{title}\n:orange[{missing_text}]"
+    if not preview:
+        return f"{title}\n:orange[Préanalyse indisponible]"
+
+    parts = []
+    if preview.get("iscn") is not None:
+        color = "green" if preview["iscn"] == 100 else "red"
+        parts.append(f":{color}[ISCN {preview['iscn']}%]")
+    if preview.get("jon") is not None:
+        color = "green" if preview["jon"] == 100 else "red"
+        parts.append(f":{color}[Jon {preview['jon']}%]")
+    if preview.get("errors"):
+        parts.append(f":red[{preview['errors']} erreur(s)]")
+    if not parts:
+        parts.append(":orange[Sans références]")
+
+    return f"{title}\n{' · '.join(parts)}"
+
 
 # Titre de l'application
 st.title("Analyseur de Formules Caryotypiques (ISCN)")
@@ -334,27 +451,77 @@ with tab1:
 # Onglet 2: Analyse d'un fichier
 with tab2:
     st.subheader("Chargez un fichier contenant des formules caryotypiques")
-    test_button = st.button("Analyser le fichier de tests")
+    remote_preview, remote_preview_err = load_google_sheet_preview(TEST_SHEET_URL)
+    remote_button_label = preview_button_label(
+        "Analyser le fichier de tests",
+        remote_preview,
+        "Préanalyse indisponible" if remote_preview_err else None,
+    )
+    if LOCAL_TEST_PATH.exists():
+        local_preview = load_local_sheet_preview(
+            str(LOCAL_TEST_PATH), LOCAL_TEST_PATH.stat().st_mtime
+        )
+        local_button_label = preview_button_label("Analyser le fichier local MYC", local_preview)
+    else:
+        local_button_label = preview_button_label(
+            "Analyser le fichier local MYC",
+            missing_text="En attente du fichier MYC",
+        )
+
+    test_col, local_col = st.columns([1, 1], gap="small")
+    test_button = test_col.button(remote_button_label, use_container_width=True)
+    local_test_button = local_col.button(local_button_label, use_container_width=True)
+
+    show_local_uploader = st.session_state.get("show_local_myc_uploader", False)
+    if show_local_uploader:
+        st.warning(
+            "Pour des raisons de confidentialité, le fichier local MYC n'est pas stocké en ligne. "
+            f"Placez `{LOCAL_TEST_FILENAME}` dans le répertoire de l'application ou chargez-le ici. "
+            "Le fichier chargé est lu en mémoire pour cette session et n'est pas écrit sur disque par l'application."
+        )
+        local_uploaded_file = st.file_uploader(
+            "Charger le fichier local MYC", type=["csv", "xlsx", "xls"], key="local_myc_file"
+        )
+    else:
+        local_uploaded_file = None
 
     uploaded_file = st.file_uploader(
-            "Choisir un fichier CSV ou Excel", type=["csv", "xlsx", "xls"], key="file"
-        )
+        "Choisir un autre fichier CSV ou Excel", type=["csv", "xlsx", "xls"], key="file"
+    )
  
 
     # Préserver les données chargées entre les reruns (ex: clic sur "Trier")
     df_input = st.session_state.get("df_input")
     if test_button:
-        TEST_SHEET_URL = (
-            "https://docs.google.com/spreadsheets/d/"
-            "1_QPAzEr3PNHaNVu8Qxuv_hWCUoBQqqRcNSnX-Q0Egm8/edit?gid=98233212#gid=98233212"
-        )
+        st.session_state["show_local_myc_uploader"] = False
         df_input, err = load_google_sheet(TEST_SHEET_URL)
         if err:
             st.error(f"Erreur lors du chargement du fichier de tests : {err}")
             st.stop()
         else:
             st.session_state["df_input"] = df_input
+    elif local_test_button:
+        if LOCAL_TEST_PATH.exists():
+            df_input = pd.read_excel(LOCAL_TEST_PATH)
+            st.session_state["df_input"] = df_input
+            st.session_state["show_local_myc_uploader"] = False
+        else:
+            st.session_state["show_local_myc_uploader"] = True
+            st.session_state["df_input"] = None
+            st.warning(
+                "Pour des raisons de confidentialité, le fichier n'est pas stocké en ligne. "
+                f"Veuillez charger votre fichier de test ou déposer `{LOCAL_TEST_FILENAME}` dans le répertoire courant."
+            )
+            st.rerun()
+    elif local_uploaded_file is not None:
+        if local_uploaded_file.name.endswith('.csv'):
+            df_input = pd.read_csv(local_uploaded_file)
+        else:
+            df_input = pd.read_excel(local_uploaded_file)
+        st.session_state["df_input"] = df_input
+        st.session_state["show_local_myc_uploader"] = False
     elif uploaded_file is not None:
+        st.session_state["show_local_myc_uploader"] = False
         # Déterminer le type de fichier
         if uploaded_file.name.endswith('.csv'):
             df_input = pd.read_csv(uploaded_file)

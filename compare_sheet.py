@@ -4,9 +4,10 @@ import io
 import os
 import shutil
 import subprocess
+import types
 from datetime import datetime
 import sys
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import pandas as pd
 
@@ -16,6 +17,7 @@ DEFAULT_SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/"
     "1_QPAzEr3PNHaNVu8Qxuv_hWCUoBQqqRcNSnX-Q0Egm8/edit?gid=98233212#gid=98233212"
 )
+DEFAULT_LOCAL_FILE = "comptage_local_MYC.xlsx"
 
 
 def load_google_sheet(url_or_id: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
@@ -59,6 +61,22 @@ def load_input(sheet: Optional[str], file_path: Optional[str]) -> pd.DataFrame:
     if err:
         raise RuntimeError(f"Failed to load Google Sheet: {err}")
     return df
+
+
+def input_jobs(sheet: Optional[str], file_path: Optional[str]):
+    if sheet and file_path:
+        raise ValueError("Use either --sheet or --file, not both.")
+    if sheet:
+        return [("Google Sheet", lambda: load_input(sheet, None))]
+    if file_path:
+        return [(os.path.basename(file_path), lambda: load_input(None, file_path))]
+
+    jobs = [("Google Sheet", lambda: load_input(DEFAULT_SHEET_URL, None))]
+    if os.path.exists(DEFAULT_LOCAL_FILE):
+        jobs.append((DEFAULT_LOCAL_FILE, lambda: load_input(None, DEFAULT_LOCAL_FILE)))
+    else:
+        print(f"Warning: local file '{DEFAULT_LOCAL_FILE}' not found; skipped.")
+    return jobs
 
 
 def detect_columns(df: pd.DataFrame) -> Tuple[str, Optional[str], Optional[str]]:
@@ -107,6 +125,7 @@ def analyze_rows(
     formule_col: str,
     count_i_col: Optional[str],
     count_j_col: Optional[str],
+    analyzer: Callable = analyser_formule,
 ):
     audit_rows = []
     errors = 0
@@ -120,7 +139,7 @@ def analyze_rows(
         ref_i = normalize_reference(row[count_i_col]) if count_i_col else None
         ref_j = normalize_reference(row[count_j_col]) if count_j_col else None
 
-        df_analyse, totals, error = analyser_formule(formule)
+        df_analyse, totals, error = analyzer(formule)
         iscn = None
         jon = None
         if error:
@@ -144,6 +163,7 @@ def analyze_rows(
 
         audit_rows.append(
             {
+                "source": None,
                 "index": idx + 1,
                 "formule": formule,
                 "iscn_obtenu": iscn if error is None else None,
@@ -167,10 +187,23 @@ def analyze_rows(
     return audit_rows, summary
 
 
-def print_summary(summary: dict):
+def discordant_rows(audit_rows):
+    rows = []
+    for row in audit_rows:
+        if row["erreur"]:
+            rows.append(row)
+            continue
+        if row["match_iscn"] is False or row["match_jon"] is False:
+            rows.append(row)
+    return rows
+
+
+def print_summary(summary: dict, label: Optional[str] = None):
     total = summary["total"]
     errors = summary["errors"]
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if label:
+        print(f"📄 Source: {label}")
     print(f"⏱  Execution  à : {now}")
     print(f"    - Total lignes: {total}")
     print(f"    - Erreurs d'analyse: {errors}")
@@ -229,9 +262,10 @@ def _normalize_index(value):
 def _index_map(rows):
     mapped = {}
     for row in rows:
+        source = row.get("source")
         idx = _normalize_index(row.get("index"))
         if idx is not None:
-            mapped[idx] = row
+            mapped[(source, idx)] = row
     return mapped
 
 
@@ -275,14 +309,14 @@ def _differs(a, b):
     return False
 
 
-def print_discordances(audit_rows, limit=20, baseline_rows=None, baseline_label=None):
-    discordances = []
-    for row in audit_rows:
-        if row["erreur"]:
-            discordances.append(row)
-            continue
-        if row["match_iscn"] is False or row["match_jon"] is False:
-            discordances.append(row)
+def print_discordances(
+    audit_rows,
+    limit=20,
+    baseline_rows=None,
+    baseline_label=None,
+    source_label=None,
+):
+    discordances = discordant_rows(audit_rows)
 
     print(f"\n⚠️  Discordances  (nb total = {len(discordances)}) :")
 
@@ -309,30 +343,43 @@ def print_discordances(audit_rows, limit=20, baseline_rows=None, baseline_label=
     print(f"Indices: {', '.join(shown_indices) if shown_indices else '—'}")
 
     if baseline_rows is not None:
+        baseline_rows = _baseline_rows_for_source(baseline_rows, source_label)
         if baseline_label:
             print(f"\nComparaison baseline: {baseline_label}")
         base_map = _index_map(baseline_rows)
         new_map = _index_map(discordances)
 
-        new_indices = [format_index(new_map[idx]) for idx in new_map.keys() if idx not in base_map]
-        resolved = [str(idx) for idx in base_map.keys() if idx not in new_map]
+        new_indices = [format_index(new_map[key]) for key in new_map.keys() if key not in base_map]
+        resolved = [str(key[1]) for key in base_map.keys() if key not in new_map]
         perturbed = [
-            str(idx)
-            for idx in new_map.keys()
-            if idx in base_map and _differs(new_map[idx], base_map[idx])
+            str(key[1])
+            for key in new_map.keys()
+            if key in base_map and _differs(new_map[key], base_map[key])
         ]
 
-        print(f"Nouveaux: {', '.join(new_indices) if new_indices else '—'}")
-        print(f"Résolues: {', '.join(resolved) if resolved else '—'}")
-        print(f"Perturbées: {', '.join(perturbed) if perturbed else '—'}")
+        print(f"Nouvelles: {', '.join(new_indices) if new_indices else '—'}")
+        print(f"Corrigées: {', '.join(resolved) if resolved else '—'}")
+        print(f"Différentes: {', '.join(perturbed) if perturbed else '—'}")
 
     return discordances
+
+
+def _baseline_rows_for_source(rows, source_label):
+    if not source_label:
+        return rows
+
+    has_source = any(row.get("source") for row in rows)
+    if not has_source:
+        return rows
+    return [row for row in rows if row.get("source") == source_label]
 
 
 def _load_baseline_csv(path: str):
     try:
         baseline_df = pd.read_csv(path)
         return baseline_df.to_dict(orient="records")
+    except pd.errors.EmptyDataError:
+        return None
     except Exception as exc:
         print(f"Warning: unable to load baseline '{path}': {exc}")
         return None
@@ -360,6 +407,42 @@ def _load_baseline_from_git(path: str):
         return baseline_df.to_dict(orient="records"), commit
     except Exception:
         return None, None
+
+
+def _load_analyzer_from_git(ref: str = "HEAD"):
+    try:
+        source = subprocess.check_output(
+            ["git", "show", f"{ref}:My_expert_karyo_functions.py"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        module = types.ModuleType(f"baseline_my_expert_{ref.replace('/', '_')}")
+        exec(compile(source, f"{ref}:My_expert_karyo_functions.py", "exec"), module.__dict__)
+        return module.analyser_formule
+    except Exception as exc:
+        print(f"Warning: unable to load baseline analyzer from {ref}: {exc}")
+        return None
+
+
+def _baseline_rows_from_git_analyzer(
+    df: pd.DataFrame,
+    formule_col: str,
+    count_i_col: Optional[str],
+    count_j_col: Optional[str],
+    source_label: str,
+):
+    analyzer = _load_analyzer_from_git("HEAD")
+    if analyzer is None:
+        return None
+
+    rows, _ = analyze_rows(df, formule_col, count_i_col, count_j_col, analyzer=analyzer)
+    for row in rows:
+        row["source"] = source_label
+    return discordant_rows(rows)
+
+
+def _is_default_local_source(label: str) -> bool:
+    return os.path.basename(label) == DEFAULT_LOCAL_FILE
 
 
 def _format_status(label: str, obtenu, ref, match):
@@ -404,6 +487,7 @@ def export_audit_csv(audit_rows, out_path: str):
         )
         rows.append(
             {
+                "source": row.get("source"),
                 "index": row.get("index"),
                 "formule": row.get("formule"),
                 "iscn_status": _format_status(
@@ -421,7 +505,8 @@ def export_audit_csv(audit_rows, out_path: str):
                 "erreur": row.get("erreur") or "",
             }
         )
-    df_audit = pd.DataFrame(rows)
+    columns = ["source", "index", "formule", "iscn_status", "jon_status", "erreur"]
+    df_audit = pd.DataFrame(rows, columns=columns)
     df_audit.to_csv(out_path, index=False)
 
 
@@ -463,9 +548,6 @@ def parse_args(argv):
 def main(argv=None) -> int:
     args = parse_args(argv or sys.argv[1:])
     try:
-        df = load_input(args.sheet, args.file)
-        formule_col, count_i_col, count_j_col = detect_columns(df)
-        audit_rows, summary = analyze_rows(df, formule_col, count_i_col, count_j_col)
         baseline_rows = None
         baseline_label = None
         baseline_path = args.baseline
@@ -477,28 +559,62 @@ def main(argv=None) -> int:
                 baseline_label = os.path.basename(baseline_path)
 
         commit_rows, commit_ref = _load_baseline_from_git(args.out)
-        print_summary(summary)
-        if args.prev:
-            discordances = print_discordances(
-                audit_rows,
-                limit=args.limit,
-                baseline_rows=baseline_rows,
-                baseline_label=baseline_label,
-            )
-        else:
-            discordances = print_discordances(
-                audit_rows,
-                limit=args.limit,
-                baseline_rows=commit_rows,
-                baseline_label=f"commit {commit_ref[:8]}" if commit_ref else None,
-            )
+        all_discordances = []
+        jobs = input_jobs(args.sheet, args.file)
+        for job_index, (label, loader) in enumerate(jobs):
+            if job_index:
+                print("\n" + "=" * 72 + "\n")
+
+            df = loader()
+            formule_col, count_i_col, count_j_col = detect_columns(df)
+            audit_rows, summary = analyze_rows(df, formule_col, count_i_col, count_j_col)
+            for row in audit_rows:
+                row["source"] = label
+
+            run_baseline_rows = baseline_rows
+            run_baseline_label = baseline_label
+            if (
+                _is_default_local_source(label)
+                and args.baseline is None
+                and not args.prev
+            ):
+                old_rows = _baseline_rows_from_git_analyzer(
+                    df,
+                    formule_col,
+                    count_i_col,
+                    count_j_col,
+                    label,
+                )
+                if old_rows is not None:
+                    run_baseline_rows = old_rows
+                    run_baseline_label = "avant règle der(x) sans points de cassure"
+
+            print_summary(summary, label=label)
+            if args.prev or run_baseline_rows is not None:
+                discordances = print_discordances(
+                    audit_rows,
+                    limit=args.limit,
+                    baseline_rows=run_baseline_rows,
+                    baseline_label=run_baseline_label,
+                    source_label=label,
+                )
+            else:
+                discordances = print_discordances(
+                    audit_rows,
+                    limit=args.limit,
+                    baseline_rows=commit_rows,
+                    baseline_label=f"commit {commit_ref[:8]}" if commit_ref else None,
+                    source_label=label,
+                )
+            all_discordances.extend(discordances)
+
         if os.path.exists(args.out):
             prev_path = f"{args.out}.prev"
             try:
                 shutil.copyfile(args.out, prev_path)
             except Exception as exc:
                 print(f"Warning: unable to save previous audit to '{prev_path}': {exc}")
-        export_audit_csv(discordances, args.out)
+        export_audit_csv(all_discordances, args.out)
         print(f"Audit CSV ecrit: {args.out}")
         return 0
     except Exception as exc:

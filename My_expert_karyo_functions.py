@@ -252,15 +252,15 @@ def is_balanced_insertion(anom):
 def is_complex_multichr_deseq(anom):
     """
     Détecte les anomalies multichromosomiques déséquilibrées (≥2 chromosomes) pour 2 points.
-    Les chromosomes dérivés ("der") sont considérés complexes par définition
-    même si un seul numéro est explicitement indiqué.
+    Les chromosomes dérivés ("der") sans points de cassure détaillés ne sont
+    pas considérés complexes: on ne sait pas s'ils impliquent un ou deux
+    chromosomes.
     Renvoie False si un seul chromosome impliqué.
     """
     # Cas particulier des chromosomes dérivés
     if anom.startswith('der'):
-        # der(X) sans autre information est considéré comme multichromosomique
-        if anom.count('(') == 1:
-            return True
+        if is_der_without_breakpoints(anom):
+            return False
         chroms = get_chromosomes(anom)
         known = count_known_chromosomes(chroms)
         # s'il n'y a pas au moins deux chromosomes identifiés -> pas complexe
@@ -434,6 +434,12 @@ def strip_multiplicity(anom: str) -> str:
     """Retire un suffixe de multiplicité (xN ou ×N) sans modifier le reste."""
 
     return re.sub(r"(?:x|×)\d+$", "", anom)
+
+
+def is_der_without_breakpoints(anom: str) -> bool:
+    """Indique si ``anom`` est un der(x) sans points de cassure détaillés."""
+
+    return bool(re.fullmatch(r"der\([^)]+\)", anom, re.IGNORECASE))
 
 
 def is_marker_anomaly(anom: str) -> bool:
@@ -1122,11 +1128,11 @@ def calcul_score_iscn(
             chroms = get_chromosomes(base_core)
             known = count_known_chromosomes(chroms)
             has_unknown = '?' in chroms
-            if base_core.count('(') == 1:
+            if is_der_without_breakpoints(base_core):
                 decision = RuleDecision(
-                    rule_id="ISCN.DER_UNDETAILLED",
-                    score=2,
-                    explanation="Chromosome dérivé non détaillé",
+                    rule_id="ISCN.DER_NO_BREAKPOINT",
+                    score=1,
+                    explanation="Chromosome dérivé sans point de cassure détaillé",
                 )
             elif known >= 2:
                 if has_unknown and '?' in base_core:

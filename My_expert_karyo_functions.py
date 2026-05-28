@@ -761,10 +761,6 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons:
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
         eff_cnt = cnt
-        if is_tetraploid_context(anom, clone_map):
-            m = re.search(r"(?:x|×)(\d+)$", anom.strip(), re.IGNORECASE)
-            if m and m.group(1) == "2":
-                eff_cnt = max(cnt // 2, 1)
         # Ignorer les anomalies constitutionnelles (+Nc)
         is_constitutional, const_expl = constitutional_status(norm)
         zeroed_entry = None
@@ -1022,10 +1018,6 @@ def calcul_score_iscn(
         base_core = strip_multiplicity(base)
         cnt_norm = norm_counts[norm]
         eff_cnt = cnt
-        if is_tetraploid_context(anom, clone_map):
-            m = re.search(r"(?:x|×)(\d+)$", anom.strip(), re.IGNORECASE)
-            if m and m.group(1) == "2":
-                eff_cnt = max(cnt // 2, 1)
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
         is_constitutional, const_expl = constitutional_status(norm)

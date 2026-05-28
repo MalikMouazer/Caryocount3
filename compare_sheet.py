@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import io
+import math
 import os
 import shutil
 import subprocess
@@ -224,8 +225,12 @@ def print_summary(summary: dict, label: Optional[str] = None):
     color_iscn = "34"  # blue
     color_jon = "33"   # brown-ish (yellow)
 
+    def format_percent(rate: float) -> str:
+        rounded_down = math.floor(rate * 100) / 100
+        return f"{rounded_down:.2f}".replace(".", ",")
+
     def progress_bar(rate: float, width: int = 20) -> str:
-        filled = int(round((rate / 100) * width))
+        filled = int(math.floor((rate / 100) * width))
         filled = max(0, min(width, filled))
         return f"[{'█' * filled}{'░' * (width - filled)}]"
 
@@ -233,7 +238,7 @@ def print_summary(summary: dict, label: Optional[str] = None):
         rate = (summary["match_i_ok"] / summary["match_i_total"]) * 100
         label = f"({color('ISCN', color_iscn)})"
         print(
-            f"    - Match ISCN {label}: {summary['match_i_ok']}/{summary['match_i_total']} ({rate:.1f}%) {progress_bar(rate)}"
+            f"    - Match ISCN {label}: {summary['match_i_ok']}/{summary['match_i_total']} ({format_percent(rate)}%) {progress_bar(rate)}"
         )
     else:
         print(f"    - Match ISCN ({color('ISCN', color_iscn)}): N/A (aucune reference)")
@@ -242,7 +247,7 @@ def print_summary(summary: dict, label: Optional[str] = None):
         rate = (summary["match_j_ok"] / summary["match_j_total"]) * 100
         label = f"({color('Jon', color_jon)})"
         print(
-            f"    - Match Jon {label}: {summary['match_j_ok']}/{summary['match_j_total']} ({rate:.1f}%) {progress_bar(rate)}"
+            f"    - Match Jon {label}: {summary['match_j_ok']}/{summary['match_j_total']} ({format_percent(rate)}%) {progress_bar(rate)}"
         )
     else:
         print(f"    - Match Jon ({color('Jon', color_jon)}): N/A (aucune reference)")

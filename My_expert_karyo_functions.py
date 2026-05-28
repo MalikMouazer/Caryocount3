@@ -621,6 +621,7 @@ def detect_implicit_anomalies(anomalies):
     )
     base_map = {}
     structural_refs: dict[tuple[str, str], list[tuple[str, str | None]]] = {}
+    der_t_refs: dict[tuple[str, str, tuple[str, ...]], list[tuple[str, str | None]]] = {}
 
     def structural_repeat_key(anom: str) -> tuple[tuple[str, str], str | None] | None:
         m = re.match(r"^(del|dup|add|ins|inv)\(([^)]*)\)((?:\([^)]*\))*)$", anom, re.IGNORECASE)
@@ -629,6 +630,21 @@ def detect_implicit_anomalies(anomalies):
         kind, chroms, breakpoints = m.groups()
         bp = breakpoints or None
         return (kind.lower(), chroms), bp
+
+    def der_t_repeat_key(anom: str) -> tuple[tuple[str, str, tuple[str, ...]], str | None] | None:
+        base = strip_multiplicity(anom)
+        m = re.match(
+            r"^(der|dic)\(([^)]*)\).*?t\(([^)]*)\)(?:\(([^)]*)\))?",
+            base,
+            re.IGNORECASE,
+        )
+        if not m:
+            return None
+        kind, anchor, t_chroms_raw, bp = m.groups()
+        t_chroms = tuple(
+            sorted((chrom.lstrip("?") or "?") for chrom in t_chroms_raw.split(";") if chrom)
+        )
+        return (kind.lower(), anchor.lstrip("?") or "?", t_chroms), bp
 
     def compatible_breakpoints(a: str | None, b: str | None) -> bool:
         return a is None or b is None or a == b
@@ -640,10 +656,30 @@ def detect_implicit_anomalies(anomalies):
         # être considérés comme des duplications implicites
         if norm.startswith(('+', '-')):
             continue
-        # Les dérivés sont traités séparément via la comparaison des
-        # ensembles chromosomiques. Ne pas les inclure ici pour éviter
-        # de marquer implicites des dérivés distincts.
         if norm.startswith(('der', 'dic')):
+            parsed = der_t_repeat_key(norm)
+            if parsed:
+                key, bp = parsed
+                refs = der_t_refs.setdefault(key, [])
+                ref_norm = next(
+                    (
+                        ref_norm
+                        for ref_norm, ref_bp in refs
+                        if compatible_breakpoints(bp, ref_bp)
+                    ),
+                    None,
+                )
+                if ref_norm:
+                    ref = norm_to_orig.get(ref_norm, ref_norm)
+                    implicit.setdefault(
+                        norm,
+                        {"reason": "Duplication avec l'anomalie de référence", "ref": ref},
+                    )
+                else:
+                    refs.append((norm, bp))
+            # Les autres dérivés sont traités séparément via la comparaison des
+            # ensembles chromosomiques. Ne pas les inclure ici pour éviter
+            # de marquer implicites des dérivés distincts.
             continue
         if norm.startswith(("del", "dup", "add", "ins", "inv")):
             parsed = structural_repeat_key(norm)

@@ -4,6 +4,7 @@ import re
 import base64
 import io
 import html
+import math
 import openpyxl
 from pathlib import Path
 from My_expert_karyo_functions import analyser_formule
@@ -97,6 +98,16 @@ def normalize_reference_value(value):
     return value
 
 
+def floor_percent(ok: int, total: int) -> float | None:
+    if not total:
+        return None
+    return math.floor((ok / total * 100) * 100) / 100
+
+
+def format_percent(value: float) -> str:
+    return f"{value:.2f}".replace(".", ",")
+
+
 def compute_match_preview(df):
     formule_col, count_i_col, count_j_col = detect_input_columns(df)
     if formule_col is None:
@@ -127,8 +138,8 @@ def compute_match_preview(df):
 
     return {
         "errors": errors,
-        "iscn": round(ok_i / total_i * 100) if total_i else None,
-        "jon": round(ok_j / total_j * 100) if total_j else None,
+        "iscn": floor_percent(ok_i, total_i),
+        "jon": floor_percent(ok_j, total_j),
     }
 
 
@@ -155,10 +166,10 @@ def preview_button_label(title, preview=None, missing_text=None):
     parts = []
     if preview.get("iscn") is not None:
         color = "green" if preview["iscn"] == 100 else "red"
-        parts.append(f":{color}[ISCN {preview['iscn']}%]")
+        parts.append(f":{color}[ISCN {format_percent(preview['iscn'])}%]")
     if preview.get("jon") is not None:
         color = "green" if preview["jon"] == 100 else "red"
-        parts.append(f":{color}[Jon {preview['jon']}%]")
+        parts.append(f":{color}[Jon {format_percent(preview['jon'])}%]")
     if preview.get("errors"):
         parts.append(f":red[{preview['errors']} erreur(s)]")
     if not parts:
@@ -827,7 +838,8 @@ with tab2:
                     total_i = sum(1 for m in match_details if m["iscn"] is not None)
                     match_i = sum(1 for m in match_details if m["iscn"])
                     if total_i:
-                        msg_i = f"Correspondance ISCN: {match_i}/{total_i} ({int(match_i/total_i*100)}%)"
+                        percent_i = format_percent(floor_percent(match_i, total_i))
+                        msg_i = f"Correspondance ISCN: {match_i}/{total_i} ({percent_i}%)"
 
                         def render_iscn(col, message=msg_i):
                             col.success(message)
@@ -838,7 +850,8 @@ with tab2:
                     total_j = sum(1 for m in match_details if m["jon"] is not None)
                     match_j = sum(1 for m in match_details if m["jon"])
                     if total_j:
-                        msg_j = f"Correspondance Jondreville: {match_j}/{total_j} ({int(match_j/total_j*100)}%)"
+                        percent_j = format_percent(floor_percent(match_j, total_j))
+                        msg_j = f"Correspondance Jondreville: {match_j}/{total_j} ({percent_j}%)"
 
                         def render_jon(col, message=msg_j):
                             col.success(message)

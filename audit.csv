@@ -1,5 +1,4 @@
 source,index,formule,iscn_status,jon_status,erreur
-Google Sheet,87,"92,XXXX,t(8;14)(q24.1;q32)×2",ISCN False 3 au lieu de 2,Jon False 3 au lieu de 2,
 comptage_local_MYC.xlsx,92,"47,XY,+12[5]/46,sl,der(8)t(8;8)(p1?2;q2?2)[13]/46,XY[2]",ISCN False 3 au lieu de 2,Jon ok 2/2,
 comptage_local_MYC.xlsx,98,"46,XX,der(8)t(8;8)(p1?2;q2?2),del(11)(q?21q?23)[11]/46,XX[9] ",ISCN False 3 au lieu de 2,Jon ok 2/2,
 comptage_local_MYC.xlsx,105,"46,XX,t(8;22)(q24;q11)[4]/49,sl,+X,+4,+12[10]/49,sdl1,del(11)(q14)[6]/49,sdl2,i(18)(q10)[5]/50,sdl3,+i(18)(q10)[2]/46,XX[4]",ISCN False 8 au lieu de 7,Jon ok 7/7,
@@ -17,6 +16,6 @@ comptage_local_MYC.xlsx,192,"46,XY,del(11)(q21q23)[13]/46,idem,der(8)t(8;8)(p11.
 comptage_local_MYC.xlsx,193,"45,X,der(X)(8qter->8q2?::8q2?->8q?::Xp22->Xqter),der(8)del(8)(p?)del(8)(q11),der(13;17)(q10;q10)[cp6]/46,XX[2]",ISCN False 4 au lieu de 5,Jon ok 3/3,
 comptage_local_MYC.xlsx,195,"46,XX,del(9)(p11),del(11)(q21q24),add(14)(q24)[7]/46,sl,der(8;18)(q10;q10),+der(8;18)(q10;q10)[13]",ISCN False 8 au lieu de 6,Jon ok 5/5,
 comptage_local_MYC.xlsx,199,"46,XX,dup(1)(q22q4?1),der(3)t(3;12)(p25;q11),der(6)t(6;7)(q15;q34),der(7)t(6;7)(q22;q34)[3]/46,sl,der(8)t(8;8)(p11;q24)[3]/46,XX[14] ",ISCN False 7 au lieu de 6,Jon ok 5/5,
-comptage_local_MYC.xlsx,210,"44,XY,der(8)t(8;15)(p12;q1?4),-13,-15,der(17)t(13;17)(q14;p1?)[9]/44,XY,-13,ins(?15;18)(?q14;q21q?),der(17)t(13;17),-18[3]/44,XY,?der(8)t(8;18)(p?1;?),-13,der(17)t(13;17),-18[3]/45,XY,der(17)t(17;?;18)(p1?1;?;q?12),-18[2]/46,XY[3]",ISCN False 11 au lieu de 10,Jon False 9 au lieu de 8,
+comptage_local_MYC.xlsx,210,"44,XY,der(8)t(8;15)(p12;q1?4),-13,-15,der(17)t(13;17)(q14;p1?)[9]/44,XY,-13,ins(?15;18)(?q14;q21q?),der(17)t(13;17),-18[3]/44,XY,?der(8)t(8;18)(p?1;?),-13,der(17)t(13;17),-18[3]/45,XY,der(17)t(17;?;18)(p1?1;?;q?12),-18[2]/46,XY[3]",ISCN False 9 au lieu de 10,Jon ok 8/8,
 comptage_local_MYC.xlsx,211,"46,XY,t(1;8)(q21;q21),t(6;20)(q25;p11),del(11)(q21q2?4)[5]/46,XY,der(1)(1pter->1q21::8q21->8q24::9q21->9qter),der(8)(8pter->8q21::1q21->1qter),der(9)(9pter->9q21::8q24->8qter),del(11)[15] ",ISCN False 9 au lieu de 5,Jon ok 6/6,
 comptage_local_MYC.xlsx,212,"46,XY,t(1;8)(q21;q21),t(6;20)(q25;p11),del(11)(q21q2?4)[5]/46,XY,der(1)t(1;9)(q21;q21)ins(1;8)(q21;q21q24),der(8)t(1;8)(q21;q21),der(9)t(8;9)(q24;q21),del(11)[15]",ISCN False 9 au lieu de 5,Jon ok 6/6,

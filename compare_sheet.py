@@ -19,6 +19,16 @@ DEFAULT_SHEET_URL = (
 )
 DEFAULT_LOCAL_FILE = "comptage_local_MYC.xlsx"
 
+# Baseline du fichier local:
+# - changer ELISE_FILE_DATE quand Elise envoie un nouveau comptage manuel;
+# - changer FROZEN_RULES_REF quand on décide de figer une nouvelle version
+#   des règles. Utiliser un hash de commit Git, un tag, ou "HEAD".
+ELISE_FILE_DATE = "13 mai"
+FROZEN_RULES_LABEL = "règles avant le 27 mai à 10h-11h"
+FROZEN_RULES_REF = "aa78455" # commit ? ou tag ? ou "HEAD" pour la version actuelle (mais moins stable comme référence)
+
+LOCAL_REFERENCE_LABEL = f"fichier Elise du {ELISE_FILE_DATE} + {FROZEN_RULES_LABEL}"
+
 
 def load_google_sheet(url_or_id: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     if not url_or_id:
@@ -431,7 +441,7 @@ def _baseline_rows_from_git_analyzer(
     count_j_col: Optional[str],
     source_label: str,
 ):
-    analyzer = _load_analyzer_from_git("HEAD")
+    analyzer = _load_analyzer_from_git(FROZEN_RULES_REF)
     if analyzer is None:
         return None
 
@@ -587,7 +597,7 @@ def main(argv=None) -> int:
                 )
                 if old_rows is not None:
                     run_baseline_rows = old_rows
-                    run_baseline_label = "avant règle der(x) sans points de cassure"
+                    run_baseline_label = LOCAL_REFERENCE_LABEL
 
             print_summary(summary, label=label)
             if args.prev or run_baseline_rows is not None:

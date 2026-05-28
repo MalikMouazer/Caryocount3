@@ -620,6 +620,19 @@ def detect_implicit_anomalies(anomalies):
         r'^(?:der|dic|t|i|ider|idic|r)\([0-9;]+\)'
     )
     base_map = {}
+    structural_refs: dict[tuple[str, str], list[tuple[str, str | None]]] = {}
+
+    def structural_repeat_key(anom: str) -> tuple[tuple[str, str], str | None] | None:
+        m = re.match(r"^(del|dup|add|ins|inv)\(([^)]*)\)((?:\([^)]*\))*)$", anom, re.IGNORECASE)
+        if not m:
+            return None
+        kind, chroms, breakpoints = m.groups()
+        bp = breakpoints or None
+        return (kind.lower(), chroms), bp
+
+    def compatible_breakpoints(a: str | None, b: str | None) -> bool:
+        return a is None or b is None or a == b
+
     for a in unique_anoms:
         norm = normalize_anomaly(a)
         # les gains/pertes répétés dans un même clone (ex: +8,+8)
@@ -633,7 +646,28 @@ def detect_implicit_anomalies(anomalies):
         if norm.startswith(('der', 'dic')):
             continue
         if norm.startswith(("del", "dup", "add", "ins", "inv")):
-            base = norm
+            parsed = structural_repeat_key(norm)
+            if not parsed:
+                continue
+            key, bp = parsed
+            refs = structural_refs.setdefault(key, [])
+            ref_norm = next(
+                (
+                    ref_norm
+                    for ref_norm, ref_bp in refs
+                    if compatible_breakpoints(bp, ref_bp)
+                ),
+                None,
+            )
+            if ref_norm:
+                ref = norm_to_orig.get(ref_norm, ref_norm)
+                implicit.setdefault(
+                    norm,
+                    {"reason": "Duplication avec l'anomalie de référence", "ref": ref},
+                )
+            else:
+                refs.append((norm, bp))
+            continue
         else:
             m = base_pattern.match(norm)
             base = m.group(0) if m else norm
@@ -716,6 +750,7 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons:
         filtered = list(anomalies)
 
     counts = Counter(filtered)
+    implicit_info = detect_implicit_anomalies(filtered)
     total = 0
     scores = {}
     explanations = {}
@@ -755,6 +790,17 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons:
                 "JON.REPEAT_NOTATION",
                 0,
                 "Anomalies déjà connues dans un autre clone",
+            )
+        if (
+            decision is None
+            and norm in implicit_info
+            and implicit_info[norm]["reason"] == "Duplication avec l'anomalie de référence"
+        ):
+            info = implicit_info[norm]
+            decision = RuleDecision(
+                rule_id="JON.IMPLICIT",
+                score=0,
+                explanation=f"{info['reason']} ({info['ref']})",
             )
         if decision is None:
             decision = apply_rule(

@@ -488,6 +488,16 @@ def anomaly_occurrences(anom: str) -> int:
     return 1
 
 
+def effective_occurrences(anom: str, count: int, clone_map: dict[str, list[str]]) -> int:
+    """Nombre d'occurrences à scorer après contexte de ploidie."""
+
+    norm = normalize_anomaly(anom)
+    multiplicity = anomaly_occurrences(norm)
+    if multiplicity == 2 and is_tetraploid_context(anom, clone_map):
+        return max(count // multiplicity, 1)
+    return count
+
+
 def is_tetraploid_context(anom: str, clone_map: dict[str, list[str]]) -> bool:
     """Indique si l'anomalie appartient à un clone en tétraploïdie."""
 
@@ -796,7 +806,7 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons:
 
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
-        eff_cnt = cnt
+        eff_cnt = effective_occurrences(anom, cnt, clone_map)
         # Ignorer les anomalies constitutionnelles (+Nc)
         is_constitutional, const_expl = constitutional_status(norm)
         zeroed_entry = None
@@ -1053,7 +1063,7 @@ def calcul_score_iscn(
         base = strip_sign(norm)
         base_core = strip_multiplicity(base)
         cnt_norm = norm_counts[norm]
-        eff_cnt = cnt
+        eff_cnt = effective_occurrences(anom, cnt, clone_map)
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
         is_constitutional, const_expl = constitutional_status(norm)

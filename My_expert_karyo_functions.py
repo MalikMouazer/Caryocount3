@@ -1072,6 +1072,183 @@ def calcul_score_iscn(
         for clone in clone_map.get(a, []):
             explicit_t_keys_by_clone.setdefault(clone, set()).add(tkey)
     counted_t_keys: dict[str, set[tuple[str, ...]]] = {}
+    intertwined_der_scores: dict[str, RuleDecision] = {}
+
+    def anchor_chromosome(anom_str: str) -> str:
+        base = strip_multiplicity(strip_sign(normalize_anomaly(anom_str)))
+        m = re.match(r"^(?:der|dic)\(([^);]+)", base, re.IGNORECASE)
+        return m.group(1).lstrip("?").upper() if m else ""
+
+    def has_intertwined_insertion(anom_str: str, chroms: set[str]) -> bool:
+        base = strip_multiplicity(strip_sign(normalize_anomaly(anom_str)))
+        return "ins(" in base or len(chroms) >= 3
+
+    def _normalize_breakpoint(bp: str | None) -> str | None:
+        if bp is None:
+            return None
+        return bp.strip().upper()
+
+    def der_breakpoint_signatures(
+        anom_str: str, include_uncertain: bool = False
+    ) -> set[tuple[str, str]]:
+        base = strip_multiplicity(strip_sign(normalize_anomaly(anom_str)))
+        signatures: set[tuple[str, str]] = set()
+
+        def add_signature(chrom: str, bp: str | None):
+            if not chrom or not bp:
+                return
+            if not include_uncertain and ("?" in chrom or "?" in bp):
+                return
+            if "?" not in chrom:
+                signatures.add((chrom.upper(), bp.upper()))
+
+        def split_breakpoint_range(text: str | None) -> list[str]:
+            bp = _normalize_breakpoint(text)
+            if not bp:
+                return []
+            matches = re.findall(r"[PQ](?:TER|\d+(?:\.\d+)?)", bp)
+            return matches or [bp]
+
+        for chroms_raw, bp_raw in re.findall(
+            r"t\(([^)]*)\)\(([^)]*)\)", base, re.IGNORECASE
+        ):
+            chroms = [c.lstrip("?").upper() for c in chroms_raw.split(";") if c]
+            bps = [_normalize_breakpoint(bp) for bp in bp_raw.split(";")]
+            if len(chroms) != len(bps):
+                continue
+            for chrom, bp in zip(chroms, bps):
+                add_signature(chrom, bp)
+
+        for chroms_raw, bp_raw in re.findall(
+            r"ins\(([^)]*)\)\(([^)]*)\)", base, re.IGNORECASE
+        ):
+            chroms = [c.lstrip("?").upper() for c in chroms_raw.split(";") if c]
+            bps = [_normalize_breakpoint(bp) for bp in bp_raw.split(";")]
+            if len(chroms) < 2 or len(bps) < 2:
+                continue
+            add_signature(chroms[0], bps[0])
+            for bp in split_breakpoint_range(bps[1]):
+                add_signature(chroms[1], bp)
+
+        for expanded in re.findall(r"\(([^()]*(?:->|::)[^()]*)\)", base):
+            for chrom, bp in re.findall(
+                r"(\d+|X|Y)([pq](?:ter|\d+(?:\.\d+)?))",
+                expanded,
+                re.IGNORECASE,
+            ):
+                add_signature(chrom, bp)
+
+        return signatures
+
+    def has_exact_intertwined_breakpoints(
+        component_items: list[tuple[str, set[str]]]
+    ) -> bool:
+        signature_counts: Counter[tuple[str, str]] = Counter()
+        for anom, _ in component_items:
+            signature_counts.update(der_breakpoint_signatures(anom))
+        paired = {sig for sig, count in signature_counts.items() if count >= 2}
+        if len(paired) < 3:
+            return False
+        paired_chroms = {chrom for chrom, _ in paired}
+        component_chroms = set().union(*(chroms for _, chroms in component_items))
+        return component_chroms.issubset(paired_chroms)
+
+    def has_supported_intertwined_breakpoints(
+        component_items: list[tuple[str, set[str]]]
+    ) -> bool:
+        signature_counts: Counter[tuple[str, str]] = Counter()
+        for anom, _ in component_items:
+            signature_counts.update(
+                der_breakpoint_signatures(anom, include_uncertain=True)
+            )
+        paired = {sig for sig, count in signature_counts.items() if count >= 2}
+        return len(paired) >= 2
+
+    def prepare_intertwined_der_scores():
+        by_clone: dict[str, list[tuple[str, set[str]]]] = {}
+        for anom in counts:
+            base = strip_multiplicity(strip_sign(normalize_anomaly(anom)))
+            if not base.startswith(("der", "dic")):
+                continue
+            chroms = {c for c in get_chromosomes(base) if c != "?"}
+            if len(chroms) < 2:
+                continue
+            for clone in clone_map.get(anom, []):
+                by_clone.setdefault(clone, []).append((anom, chroms))
+
+        for _, items in by_clone.items():
+            if len(items) < 3:
+                continue
+            union = set().union(*(chroms for _, chroms in items))
+            anchors = {anchor_chromosome(anom) for anom, _ in items}
+            if len(union) < 3 or not union.issubset(anchors | union):
+                continue
+            if len(anchors & union) < 3:
+                continue
+
+            remaining = set(range(len(items)))
+            while remaining:
+                stack = [remaining.pop()]
+                component = []
+                comp_chroms: set[str] = set()
+                while stack:
+                    idx = stack.pop()
+                    component.append(idx)
+                    comp_chroms.update(items[idx][1])
+                    linked = [
+                        other
+                        for other in list(remaining)
+                        if items[idx][1].intersection(items[other][1])
+                    ]
+                    for other in linked:
+                        remaining.remove(other)
+                        stack.append(other)
+
+                if len(component) < 3 or len(comp_chroms) < 3:
+                    continue
+                component_items = [items[idx] for idx in component]
+                component_anchors = {
+                    anchor_chromosome(anom) for anom, _ in component_items
+                }
+                if len(component_anchors & comp_chroms) < 3:
+                    continue
+                component_items.sort(
+                    key=lambda item: first_index.get(normalize_anomaly(item[0]), float("inf"))
+                )
+                is_exact = has_exact_intertwined_breakpoints(component_items)
+                is_supported = has_supported_intertwined_breakpoints(component_items)
+                if not is_exact and not is_supported:
+                    continue
+                insertion = any(
+                    has_intertwined_insertion(anom, chroms)
+                    for anom, chroms in component_items
+                )
+                primary, _ = component_items[0]
+                if is_exact:
+                    rule_id = "ISCN.INTERTWINED_DER_BALANCED"
+                    score = 2 if insertion else 1
+                    explanation = "Dérivés enchevêtrés équilibrés"
+                    if insertion:
+                        explanation = f"{explanation} (+1 insertion)"
+                else:
+                    rule_id = "ISCN.INTERTWINED_DER_UNBALANCED"
+                    score = 2
+                    explanation = (
+                        "Dérivés enchevêtrés reliés avec cassures non concordantes"
+                    )
+                intertwined_der_scores[primary] = RuleDecision(
+                    rule_id=rule_id,
+                    score=score,
+                    explanation=explanation,
+                )
+                for anom, _ in component_items[1:]:
+                    intertwined_der_scores[anom] = RuleDecision(
+                        rule_id="ISCN.INTERTWINED_DER_PART",
+                        score=0,
+                        explanation="Dérivé déjà compté dans le remaniement enchevêtré",
+                    )
+
+    prepare_intertwined_der_scores()
 
     def has_balanced_mirror_der(anom_str: str) -> bool:
         t_keys = der_t_any.get(anom_str, set())
@@ -1170,6 +1347,9 @@ def calcul_score_iscn(
                 0,
                 "Anomalies déjà connues dans un autre clone",
             )
+
+        if decision is None and anom in intertwined_der_scores:
+            decision = intertwined_der_scores[anom]
 
         if decision is None and norm.startswith("t("):
             tkey = t_key_from_str(norm)

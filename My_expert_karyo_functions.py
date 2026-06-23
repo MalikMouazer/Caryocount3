@@ -493,7 +493,11 @@ def effective_occurrences(anom: str, count: int, clone_map: dict[str, list[str]]
 
     norm = normalize_anomaly(anom)
     multiplicity = anomaly_occurrences(norm)
-    if multiplicity == 2 and is_tetraploid_context(anom, clone_map):
+    if (
+        multiplicity == 2
+        and is_tetraploid_context(anom, clone_map)
+        and tetraploid_clone_uses_global_multiplicity(anom, clone_map)
+    ):
         return max(count // multiplicity, 1)
     return count
 
@@ -506,6 +510,34 @@ def is_tetraploid_context(anom: str, clone_map: dict[str, list[str]]) -> bool:
         return False
     anom_clones = set(clone_map.get(anom, []))
     return bool(tetrap_clones & anom_clones)
+
+
+def tetraploid_clone_uses_global_multiplicity(
+    anom: str, clone_map: dict[str, list[str]]
+) -> bool:
+    """Indique si le x2 est une notation globale du clone tetraploide.
+
+    Si le clone contient aussi des anomalies non suffixees x2, le x2 restant est
+    interprete comme une vraie multiplicite locale de cette anomalie.
+    """
+
+    tetrap_clones = set(clone_map.get("Tetraploidy", []))
+    anom_clones = set(clone_map.get(anom, [])) & tetrap_clones
+    if not anom_clones:
+        return False
+
+    for clone in anom_clones:
+        clone_anomalies = [
+            other
+            for other, clones in clone_map.items()
+            if clone in clones and other not in {"Tetraploidy", "Triploidy"}
+        ]
+        if clone_anomalies and all(
+            anomaly_occurrences(normalize_anomaly(other)) == 2
+            for other in clone_anomalies
+        ):
+            return True
+    return False
 
 
 def constitutional_status(norm: str) -> tuple[bool, str]:

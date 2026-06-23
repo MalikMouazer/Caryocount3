@@ -568,7 +568,7 @@ def append_uncertainty_note(anom: str, explanation: str) -> str:
 # =========================
 # Anomalies implicites
 # =========================
-def detect_implicit_anomalies(anomalies):
+def detect_implicit_anomalies(anomalies, clone_map=None):
     """Détecte les anomalies implicites et renvoie un dict.
 
     Le dict a pour clé l'anomalie normalisée et pour valeur un
@@ -584,6 +584,11 @@ def detect_implicit_anomalies(anomalies):
         norm = normalize_anomaly(a)
         norm_to_orig.setdefault(norm, a)
         first_index.setdefault(norm, idx)
+
+    norm_to_clones: dict[str, set[str]] = {}
+    if clone_map:
+        for raw_anom, clones in clone_map.items():
+            norm_to_clones.setdefault(normalize_anomaly(raw_anom), set()).update(clones)
 
     implicit = {}
 
@@ -630,6 +635,7 @@ def detect_implicit_anomalies(anomalies):
                             "anom": an,
                             "index": index,
                             "centromeric": centromeric,
+                            "clones": norm_to_clones.get(an, set()),
                         })
 
     for an in norm_counts:
@@ -638,9 +644,18 @@ def detect_implicit_anomalies(anomalies):
             if not num or num not in multi_der:
                 continue
             entries = sorted(
-                multi_der[num],
+                [
+                    entry
+                    for entry in multi_der[num]
+                    if not clone_map
+                    or norm_to_clones.get(an, set()).intersection(
+                        entry.get("clones", set())  # type: ignore[arg-type]
+                    )
+                ],
                 key=lambda e: e["index"],  # type: ignore[index]
             )
+            if not entries:
+                continue
             if an.startswith('-'):
                 ref_entry = entries[0]
                 reason = "Perte implicite"
@@ -926,7 +941,7 @@ def calcul_score_iscn(
 
     counts = Counter(anomalies)
     norm_counts = Counter(normalize_anomaly(a) for a in anomalies)
-    implicit_info = detect_implicit_anomalies(anomalies)
+    implicit_info = detect_implicit_anomalies(anomalies, clone_map)
     first_index = {}
     for idx, anom in enumerate(anomalies):
         first_index.setdefault(normalize_anomaly(anom), idx)

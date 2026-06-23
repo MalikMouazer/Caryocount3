@@ -1448,7 +1448,8 @@ def calcul_score_iscn(
             if chosen_key and chosen_clone:
                 # Si second chromosome incertain, ne pas surcoter via la t
                 chroms = get_chromosomes(base_core)
-                if len(chosen_key) < 2 or "?" in chroms:
+                known_chroms = {chrom for chrom in chroms if chrom != "?"}
+                if len(chosen_key) < 2 or len(known_chroms) < 2 or "?" in chroms:
                     decision = None
                 elif chosen_key in explicit_t_keys_by_clone.get(chosen_clone, set()):
                     decision = RuleDecision(

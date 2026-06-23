@@ -11,7 +11,7 @@ from dataclasses import dataclass
 def get_chromosomes(anom):
     """Retourne l'ensemble des chromosomes impliqués dans ``anom``.
 
-    La fonction détecte les numéros apparaissant :
+    La fonction détecte les chromosomes apparaissant :
     - juste après les mots clés (der, del, dup, t, ...)
     - dans la seconde parenthèse des notations ``der(...)`` (apès les flèches)
     - précédés d'un ``?`` comme dans ``t(?1;17)``
@@ -19,22 +19,22 @@ def get_chromosomes(anom):
 
     nums: set[str] = set()
 
-    # 1) Numéros directement après der(...), t(...), etc.
-    for m in re.finditer(r'(?:der|dic|del|dup|ins|t|i|ider|idic|r)\((\??[0-9;?]+)', anom):
+    # 1) Chromosomes directement après der(...), t(...), etc.
+    for m in re.finditer(r'(?:der|dic|del|dup|ins|t|i|ider|idic|r)\((\??[0-9XYxy;?]+)', anom):
         raw = m.group(1)
-        # Se limiter à la partie numérique avant un ")" ou une nouvelle parenthèse
+        # Se limiter à la partie chromosomique avant un ")" ou une nouvelle parenthèse
         raw = re.split(r'[)()]', raw)[0]
         for num in raw.split(';'):
-            cleaned = num.lstrip('?')
+            cleaned = num.lstrip('?').upper()
             if cleaned:
                 nums.add(cleaned)
             elif '?' in num:
                 nums.add('?')
 
-    # 2) Numéros mentionnés dans la seconde parenthèse des der(...)
+    # 2) Chromosomes mentionnés dans la seconde parenthèse des der(...)
     for _, second in re.findall(r'der\(([^)]*)\)\(([^)]*)\)', anom):
-        for n in re.findall(r'\??(\d+)(?=[pq])', second):
-            nums.add(n.lstrip('?'))
+        for n in re.findall(r'\??(\d+|X|Y)(?=[pq])', second, re.IGNORECASE):
+            nums.add(n.lstrip('?').upper())
         if '?' in second:
             nums.add('?')
 
@@ -622,11 +622,9 @@ def detect_implicit_anomalies(anomalies, clone_map=None):
         if an.startswith(('der', 'dic')):
             m = re.match(r"^(?:der|dic)\(([0-9?;]+)\)", an)
             if m:
-                # Chromosomes juste apres der(...)
-                chrs = extract_chr_ids(m.group(1))
-                # Ajouter egalement les partenaires de la/les translocations t(...)
-                for t in re.finditer(r"t\(([0-9?;]+)\)", an):
-                    chrs.update(extract_chr_ids(t.group(1)))
+                # Inclut der(...), t(...), et les écritures déroulées
+                # der(...)(8pter->...::17q11->17qter).
+                chrs = {c for c in get_chromosomes(an) if c != '?'}
                 if len(chrs) > 1:
                     centromeric = bool(re.search(r'[pq]10', an))
                     index = first_index.get(an, float('inf'))

@@ -927,6 +927,9 @@ def calcul_score_iscn(
     counts = Counter(anomalies)
     norm_counts = Counter(normalize_anomaly(a) for a in anomalies)
     implicit_info = detect_implicit_anomalies(anomalies)
+    first_index = {}
+    for idx, anom in enumerate(anomalies):
+        first_index.setdefault(normalize_anomaly(anom), idx)
 
     rows = []
     total = 0
@@ -1090,6 +1093,36 @@ def calcul_score_iscn(
                     return True
         return False
 
+    def prior_structural_base(anom_str: str) -> str | None:
+        norm = normalize_anomaly(anom_str)
+        if not norm.startswith("+"):
+            return None
+        base = strip_multiplicity(strip_sign(norm))
+        structural_prefixes = (
+            "der",
+            "dic",
+            "idic",
+            "ider",
+            "i(",
+            "inv",
+            "del",
+            "dup",
+            "ins",
+            "add",
+            "r(",
+        )
+        if not base.startswith(structural_prefixes):
+            return None
+        current_idx = first_index.get(norm, float("inf"))
+        for previous in anomalies:
+            prev_norm = normalize_anomaly(previous)
+            if first_index.get(prev_norm, float("inf")) >= current_idx:
+                continue
+            prev_base = strip_multiplicity(strip_sign(prev_norm))
+            if prev_base == base:
+                return base
+        return None
+
     for anom, cnt in counts.items():
         norm = normalize_anomaly(anom)
         base = strip_sign(norm)
@@ -1158,6 +1191,18 @@ def calcul_score_iscn(
                     rule_id="ISCN.IMPLICIT",
                     score=0,
                     explanation=f"{info['reason']} ({info['ref']})",
+                )
+
+        if decision is None:
+            prior_base = prior_structural_base(anom)
+            if prior_base:
+                decision = RuleDecision(
+                    rule_id="ISCN.STRUCTURAL_GAIN_DUPLICATE",
+                    score=1,
+                    explanation=(
+                        "Duplication d'une anomalie structurale deja decrite "
+                        f"({prior_base})"
+                    ),
                 )
 
         if decision is None and norm.startswith("+"):
@@ -1285,7 +1330,13 @@ def calcul_score_iscn(
             extra_match = re.search(r"(add|inv|ins|del|dup)\(", base_core)
             if extra_match and has_balanced_mirror_der(anom):
                 extra_component = extra_match.group(1)
-            if norm.startswith("+"):
+            if (
+                norm.startswith("+")
+                and (
+                    decision is None
+                    or decision.rule_id != "ISCN.STRUCTURAL_GAIN_DUPLICATE"
+                )
+            ):
                 extra_der_gain = True
 
         if decision is None and norm.startswith(("+", "-")):

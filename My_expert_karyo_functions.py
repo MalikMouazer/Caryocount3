@@ -934,12 +934,15 @@ def calcul_score_iscn(
     anomalies,
     clone_map,
     zeroed_reasons: dict[str, tuple[int, str]] | None = None,
+    scoring_clone_map=None,
 ):
     """Calcule le détail des scores selon la grille ISCN 2024."""
 
     counts = Counter(anomalies)
     norm_counts = Counter(normalize_anomaly(a) for a in anomalies)
-    implicit_info = detect_implicit_anomalies(anomalies, clone_map)
+    implicit_info = detect_implicit_anomalies(
+        anomalies, scoring_clone_map or clone_map
+    )
     first_index = {}
     for idx, anom in enumerate(anomalies):
         first_index.setdefault(normalize_anomaly(anom), idx)
@@ -1780,9 +1783,12 @@ def analyser_formule(formule, debug: bool = False):
         # un score nul avec justification.
         scorable_entries, clone_details_ready, zeroed_reasons = deduplicate_inter_clones(entries)
         scorable_anomalies = [entry["anomaly"] for entry in scorable_entries]
+        scoring_clone_map = {}
+        for entry in scorable_entries:
+            scoring_clone_map.setdefault(entry["anomaly"], []).append(entry["clone"])
 
         df_iscn, total_iscn, rule_id_iscn, rule_expl_iscn = calcul_score_iscn(
-            scorable_anomalies, clone_map, zeroed_reasons
+            scorable_anomalies, clone_map, zeroed_reasons, scoring_clone_map
         )
         jondroville_scores, jondroville_explanations, total_jondroville, rule_id_jon, rule_expl_jon = calcul_score_jondroville(
             scorable_anomalies, clone_map, scorable_entries, zeroed_reasons

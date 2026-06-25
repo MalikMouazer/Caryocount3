@@ -489,55 +489,13 @@ def anomaly_occurrences(anom: str) -> int:
 
 
 def effective_occurrences(anom: str, count: int, clone_map: dict[str, list[str]]) -> int:
-    """Nombre d'occurrences à scorer après contexte de ploidie."""
+    """Nombre d'occurrences à scorer.
 
-    norm = normalize_anomaly(anom)
-    multiplicity = anomaly_occurrences(norm)
-    if (
-        multiplicity == 2
-        and is_tetraploid_context(anom, clone_map)
-        and tetraploid_clone_uses_global_multiplicity(anom, clone_map)
-    ):
-        return max(count // multiplicity, 1)
-    return count
-
-
-def is_tetraploid_context(anom: str, clone_map: dict[str, list[str]]) -> bool:
-    """Indique si l'anomalie appartient à un clone en tétraploïdie."""
-
-    tetrap_clones = set(clone_map.get("Tetraploidy", []))
-    if not tetrap_clones:
-        return False
-    anom_clones = set(clone_map.get(anom, []))
-    return bool(tetrap_clones & anom_clones)
-
-
-def tetraploid_clone_uses_global_multiplicity(
-    anom: str, clone_map: dict[str, list[str]]
-) -> bool:
-    """Indique si le x2 est une notation globale du clone tetraploide.
-
-    Si le clone contient aussi des anomalies non suffixees x2, le x2 restant est
-    interprete comme une vraie multiplicite locale de cette anomalie.
+    Les suffixes xN/×N sont toujours traités comme une multiplicité locale,
+    indépendamment du contexte de ploidie.
     """
 
-    tetrap_clones = set(clone_map.get("Tetraploidy", []))
-    anom_clones = set(clone_map.get(anom, [])) & tetrap_clones
-    if not anom_clones:
-        return False
-
-    for clone in anom_clones:
-        clone_anomalies = [
-            other
-            for other, clones in clone_map.items()
-            if clone in clones and other not in {"Tetraploidy", "Triploidy"}
-        ]
-        if clone_anomalies and all(
-            anomaly_occurrences(normalize_anomaly(other)) == 2
-            for other in clone_anomalies
-        ):
-            return True
-    return False
+    return count
 
 
 def constitutional_status(norm: str) -> tuple[bool, str]:
@@ -836,7 +794,7 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons:
                 jon_dup_expl[anom] = "Duplication avec l'anomalie de référence"
                 continue
             clones.add(clone)
-            filtered.append(anom)
+            filtered.extend([anom] * int(entry.get("count", 1)))
     else:
         filtered = list(anomalies)
 
@@ -1656,6 +1614,14 @@ def deduplicate_inter_clones(entries):
     marker_suppressed: dict[str, set[str]] = {}
     marker_ref_counts: dict[str, int] = {}
     zeroed_reasons: dict[str, tuple[int, str]] = {}
+
+    def unit_entry(entry: dict) -> dict:
+        """Retourne une occurrence unitaire pour éviter une double multiplicité."""
+
+        copied = dict(entry)
+        copied["count"] = 1
+        return copied
+
     for entry in entries:
         raw_anom = entry["anomaly"]
         norm = normalize_anomaly(raw_anom)
@@ -1735,7 +1701,7 @@ def deduplicate_inter_clones(entries):
                 zeroed_reasons[raw_anom] = (score_override, reason)
                 zeroed_reasons[normalize_anomaly(raw_anom)] = (score_override, reason)
                 for _ in range(count):
-                    scorable_entries.append(entry)
+                    scorable_entries.append(unit_entry(entry))
                 continue
         if is_reference and is_marker:
             marker_ref_counts.setdefault(key_for_ref, count)
@@ -1758,7 +1724,7 @@ def deduplicate_inter_clones(entries):
             if not is_reference and is_marker:
                 bucket_entry["is_reference"] = True
             for _ in range(scorable_count):
-                scorable_entries.append(entry)
+                scorable_entries.append(unit_entry(entry))
 
     clone_details_ready = {
         anom: list(clone_dict.values()) for anom, clone_dict in clone_details_map.items()

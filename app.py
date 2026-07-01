@@ -7,6 +7,7 @@ import html
 import math
 import uuid
 import openpyxl
+import streamlit.components.v1 as components
 from pathlib import Path
 from My_expert_karyo_functions import analyser_formule, get_rule_catalog_dataframe, get_rule_path
 
@@ -288,6 +289,7 @@ def format_anomalies_compact(anomalies_df):
         ):
             applied_text = str(applied_explanation)
 
+        popover_id = f"rule-popover-{uuid.uuid4().hex}"
         items = []
         for step in path:
             selected = bool(step["selected"])
@@ -313,7 +315,6 @@ def format_anomalies_compact(anomalies_df):
                 '</div>'
             )
 
-        popover_id = f"rule-popover-{uuid.uuid4().hex}"
         return (
             f'<button type="button" class="rule-help" popovertarget="{popover_id}" '
             'aria-label="Afficher le parcours de règles">?</button>'
@@ -821,19 +822,32 @@ with tab2:
                         except Exception as sort_err:
                             st.warning(f"Tri non appliqué (erreur: {sort_err})")
 
-                header_html = "".join(
-                    f"<th>{html.escape(label)}</th>" for label in display_labels
-                )
+                header_cells = []
+                for label in display_labels:
+                    if label == "Ligne":
+                        header_cells.append(
+                            '<th class="line-jump-header">'
+                            '<div class="line-jump-title">Ligne</div>'
+                            '<input class="line-jump-input" type="number" min="1" '
+                            'placeholder="N°" aria-label="Aller à une ligne">'
+                            '</th>'
+                        )
+                    else:
+                        header_cells.append(f"<th>{html.escape(label)}</th>")
+                header_html = "".join(header_cells)
 
                 body_rows = []
                 for idx in display_order:
                     row_data = results_df.iloc[idx]
+                    line_number = html.escape(format_display(row_data.get("Ligne")))
                     anomalies = all_anomalies_details[idx]
                     matches = match_details[idx] if idx < len(match_details) else {"iscn": None, "jon": None}
                     cells = []
 
                     for label in display_labels:
-                        if label == "Comptage ISCN":
+                        if label == "Ligne":
+                            cells.append(f'<td class="line-number-cell">{line_number}</td>')
+                        elif label == "Comptage ISCN":
                             raw_value = row_data.get(label)
                             icon = ""
                             if matches["iscn"] is not None:
@@ -872,7 +886,7 @@ with tab2:
                             value = format_display(row_data.get(label))
                             cells.append(f"<td>{html.escape(value)}</td>")
 
-                    body_rows.append(f"<tr>{''.join(cells)}</tr>")
+                    body_rows.append(f'<tr id="formule-{line_number}">{"".join(cells)}</tr>')
 
                 table_html = f"""
                 <div class="results-table-container">
@@ -888,6 +902,46 @@ with tab2:
                 """
 
                 st.markdown(table_html, unsafe_allow_html=True)
+                components.html(
+                    """
+                    <script>
+                    (function () {
+                        function bindLineJumpInput() {
+                            const doc = window.parent.document;
+                            const inputs = doc.querySelectorAll("th.line-jump-header input.line-jump-input:not([data-line-jump-bound='1'])");
+                            inputs.forEach(function (input) {
+                                input.dataset.lineJumpBound = "1";
+                                input.addEventListener("focus", function () {
+                                    this.select();
+                                });
+                                input.addEventListener("keydown", function (event) {
+                                    if (event.key !== "Enter") {
+                                        return;
+                                    }
+                                    event.preventDefault();
+                                    const value = this.value.trim();
+                                    if (!/^\\d+$/.test(value)) {
+                                        return;
+                                    }
+                                    const row = doc.getElementById("formule-" + value);
+                                    if (!row) {
+                                        return;
+                                    }
+                                    doc.querySelectorAll(".formula-row-target").forEach(function (activeRow) {
+                                        activeRow.classList.remove("formula-row-target");
+                                    });
+                                    row.scrollIntoView({block: "center", behavior: "smooth"});
+                                    row.classList.add("formula-row-target");
+                                });
+                            });
+                        }
+                        bindLineJumpInput();
+                        window.setTimeout(bindLineJumpInput, 500);
+                    })();
+                    </script>
+                    """,
+                    height=0,
+                )
 
                 # Statistiques de correspondance + export sur une seule ligne
                 columns = st.columns(3)
@@ -1039,6 +1093,50 @@ st.markdown("""
         background-color: #ffffff;
         overflow-wrap: anywhere;
         word-break: break-word;
+    }
+
+    .results-table tr:target td {
+        background-color: #fff7d6;
+        box-shadow: inset 4px 0 0 #f5c542;
+    }
+
+    .results-table tr.formula-row-target td {
+        background-color: #fff7d6;
+        box-shadow: inset 4px 0 0 #f5c542;
+    }
+
+    .line-number-cell {
+        white-space: nowrap;
+        font-weight: 700;
+        color: #111827;
+        text-align: center;
+    }
+
+    .line-jump-header {
+        min-width: 86px;
+    }
+
+    .line-jump-title {
+        margin-bottom: 4px;
+    }
+
+    .line-jump-input {
+        width: 64px;
+        height: 28px;
+        border: 1px solid #cbd5e1;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font: inherit;
+        font-weight: 700;
+        text-align: center;
+        background: #ffffff;
+        color: #111827;
+    }
+
+    .line-jump-input:focus {
+        border-color: #3a6ea5;
+        box-shadow: 0 0 0 2px rgba(58, 110, 165, 0.16);
+        outline: none;
     }
 
     /* Ajuster la largeur des colonnes Formule et Anomalies détectées */
@@ -1226,6 +1324,13 @@ st.markdown("""
 
     .rule-step.selected {
         color: #0f5132;
+    }
+
+    .rule-step:target {
+        outline: 2px solid #2563eb;
+        outline-offset: 2px;
+        border-radius: 4px;
+        background-color: #eff6ff;
     }
 
     .rule-step-order {

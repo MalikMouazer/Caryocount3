@@ -5,9 +5,10 @@ import base64
 import io
 import html
 import math
+import uuid
 import openpyxl
 from pathlib import Path
-from My_expert_karyo_functions import analyser_formule
+from My_expert_karyo_functions import analyser_formule, get_rule_catalog_dataframe, get_rule_path
 
 LOCAL_TEST_FILENAME = "comptage_local_MYC.xlsx"
 LOCAL_TEST_PATH = Path(__file__).resolve().parent / LOCAL_TEST_FILENAME
@@ -274,12 +275,63 @@ def format_anomalies_compact(anomalies_df):
             return "#3A6EA5"
         return "#9EA7B8"
 
-    def build_pill_text(label, score, explanation, detail_text):
+    def build_rule_help(rule_id, applied_explanation):
+        path = get_rule_path(str(rule_id or ""))
+        if not path:
+            return ""
+
+        applied_text = ""
+        if isinstance(applied_explanation, str) and applied_explanation.strip():
+            applied_text = applied_explanation.strip()
+        elif applied_explanation is not None and not (
+            isinstance(applied_explanation, float) and pd.isna(applied_explanation)
+        ):
+            applied_text = str(applied_explanation)
+
+        items = []
+        for step in path:
+            selected = bool(step["selected"])
+            step_class = " selected" if selected else ""
+            marker = "retenue" if selected else "testée avant"
+            score_text = step.get("default_score")
+            score_html = f" · score {html.escape(str(score_text))}" if score_text != "" else ""
+            items.append(
+                f'<li class="rule-step{step_class}">'
+                f'<span class="rule-step-order">{step["order"]}</span>'
+                f'<span><strong>{html.escape(str(step["rule_id"]))}</strong>'
+                f' <em>{html.escape(marker)}</em>{score_html}<br>'
+                f'{html.escape(str(step["title"]))}'
+                f'<small>{html.escape(str(step["explanation"]))}</small>'
+                f'</span></li>'
+            )
+
+        applied_html = ""
+        if applied_text:
+            applied_html = (
+                '<div class="rule-applied">'
+                f'<strong>Explication appliquée :</strong> {html.escape(applied_text)}'
+                '</div>'
+            )
+
+        popover_id = f"rule-popover-{uuid.uuid4().hex}"
+        return (
+            f'<button type="button" class="rule-help" popovertarget="{popover_id}" '
+            'aria-label="Afficher le parcours de règles">?</button>'
+            f'<div id="{popover_id}" class="rule-popover" popover>'
+            f'{applied_html}'
+            '<ol>'
+            f'{"".join(items)}'
+            '</ol>'
+            '</div>'
+        )
+
+    def build_pill_text(label, score, explanation, detail_text, rule_id, applied_explanation):
         detail = detail_text
         if explanation != '—':
             detail = f"{detail_text} ({explanation})"
+        rule_help = build_rule_help(rule_id, applied_explanation)
         score_value = render_score_value(score)
-        return f"{label} {score_value} : {detail}"
+        return f"{label} {rule_help}{score_value} : {detail}"
 
     for _, row in anomalies_df.iterrows():
         score_iscn = row['Score ISCN 2024']
@@ -291,6 +343,10 @@ def format_anomalies_compact(anomalies_df):
 
         explication_iscn = clean_text(row.get('Explication'))
         explication_jon = clean_text(row.get('Explication Jondreville 2020'))
+        rule_id_iscn = row.get('RuleID_ISCN') or ''
+        rule_id_jon = row.get('RuleID_Jon') or ''
+        rule_explanation_iscn = row.get('RuleExplanation_ISCN') or row.get('Explication')
+        rule_explanation_jon = row.get('RuleExplanation_Jon') or row.get('Explication Jondreville 2020')
         clone_details = row.get('CloneDetails')
         if not isinstance(clone_details, list) or not clone_details:
             clone_details = [{"label": None, "is_reference": True, "reason": "", "count": 1}]
@@ -326,8 +382,8 @@ def format_anomalies_compact(anomalies_df):
             line_html = (
                 f'<div class="anomaly-line" style="border-left-color: {color};">'
                 f'<span class="anomaly-label" style="color: {color};">{anomaly_label}</span>'
-                f'<span class="score-pill score-pill-iscn">{build_pill_text("ISCN", line_score_iscn, line_exp_iscn, type_text)}</span>'
-                f'<span class="score-pill score-pill-jon">{build_pill_text("Jon", line_score_jon, line_exp_jon, type_text)}</span>'
+                f'<span class="score-pill score-pill-iscn">{build_pill_text("ISCN", line_score_iscn, line_exp_iscn, type_text, rule_id_iscn, rule_explanation_iscn)}</span>'
+                f'<span class="score-pill score-pill-jon">{build_pill_text("Jon", line_score_jon, line_exp_jon, type_text, rule_id_jon, rule_explanation_jon)}</span>'
                 '</div>'
             )
 
@@ -411,6 +467,9 @@ Cette application permet d'analyser des formules caryotypiques (notation ISCN) p
 - Comparer le comptage automatique avec un comptage manuel (si disponible)
 """)
 
+with st.expander("Référentiel des règles de scoring"):
+    st.dataframe(get_rule_catalog_dataframe(), use_container_width=True, hide_index=True)
+
 # Création des onglets (par défaut: analyse d'un fichier)
 tab2, tab1 = st.tabs(["Analyse d'un fichier", "Analyse d'une formule"])
 
@@ -421,7 +480,7 @@ with tab1:
     
     if st.button("Analyser la formule", key="analyser_formule"):
         if formule:
-            df, totals, error = analyser_formule(formule)
+            df, totals, error = analyser_formule(formule, debug=True)
             if error:
                 st.error(error)
             else:
@@ -605,7 +664,7 @@ with tab2:
                     ref_iscn_value = normalize_reference(row['Count_i']) if has_count_i else None
                     ref_jondroville_value = normalize_reference(row['Count_j']) if has_count_j else None
 
-                    df_analyse, totals, error = analyser_formule(formule_fichier)
+                    df_analyse, totals, error = analyser_formule(formule_fichier, debug=True)
 
                     match_detail = {"iscn": None, "jon": None}
 
@@ -929,6 +988,7 @@ st.markdown("""
     .score-pill {
         display: inline-flex;
         align-items: center;
+        position: relative;
         border-radius: 999px;
         padding: 2px 10px;
         font-weight: 600;
@@ -1102,6 +1162,103 @@ st.markdown("""
     }
 
     .score-cell .score-pill {
+        font-size: 0.85rem;
+    }
+
+    .rule-help {
+        width: 18px;
+        height: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        margin: 0 2px;
+        padding: 0;
+        border-radius: 999px;
+        background-color: #ffffff;
+        color: #374151;
+        border: 1px solid #9ca3af;
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+        line-height: 1;
+        font-family: inherit;
+    }
+
+    .rule-help:hover {
+        background-color: #f8fafc;
+        border-color: #64748b;
+    }
+
+    .rule-popover {
+        min-width: 360px;
+        max-width: min(560px, 85vw);
+        max-height: 420px;
+        overflow: auto;
+        padding: 12px;
+        background-color: #ffffff;
+        color: #111827;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+        white-space: normal;
+        font-weight: 400;
+        margin: auto;
+    }
+
+    .rule-popover ol {
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .rule-step {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 8px;
+        padding: 7px 0;
+        border-top: 1px solid #eef2f7;
+    }
+
+    .rule-step:first-child {
+        border-top: none;
+    }
+
+    .rule-step.selected {
+        color: #0f5132;
+    }
+
+    .rule-step-order {
+        width: 20px;
+        height: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        background-color: #eef2f7;
+        color: #475569;
+        font-size: 11px;
+        font-weight: 700;
+    }
+
+    .rule-step.selected .rule-step-order {
+        background-color: #d1fae5;
+        color: #065f46;
+    }
+
+    .rule-step small {
+        display: block;
+        margin-top: 3px;
+        color: #64748b;
+        font-size: 0.78rem;
+        line-height: 1.35;
+    }
+
+    .rule-applied {
+        padding: 8px;
+        border-radius: 4px;
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
         font-size: 0.85rem;
     }
 

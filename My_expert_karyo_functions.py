@@ -757,6 +757,153 @@ def detect_implicit_anomalies(anomalies, clone_map=None):
 # Scoring
 # =========================
 @dataclass(frozen=True)
+class RuleSpec:
+    rule_id: str
+    system: str
+    default_score: int | str
+    title: str
+    explanation: str
+
+
+RULE_CATALOG: tuple[RuleSpec, ...] = (
+    RuleSpec("ISCN.CONSTITUTIONAL", "ISCN 2024", 0, "Anomalie constitutionnelle", "Anomalie notée constitutionnelle ou suspecte constitutionnelle."),
+    RuleSpec("ISCN.REPEAT_NOTATION", "ISCN 2024", 0, "Notation de répétition", "Notation idem/sl/sdl déjà portée par un clone précédent."),
+    RuleSpec("ISCN.ABSENT_IN_REPEAT", "ISCN 2024", "0 ou 1", "Absence dans un clone répété", "Anomalie indiquée absente dans un clone secondaire, avec exception pour perte chromosomique implicite."),
+    RuleSpec("ISCN.IMPLICIT", "ISCN 2024", 0, "Anomalie implicite", "Anomalie déjà expliquée par une anomalie de référence."),
+    RuleSpec("ISCN.BALANCED_T", "ISCN 2024", 1, "Translocation équilibrée", "Translocation avec dérivés réciproques compatibles."),
+    RuleSpec("ISCN.UNBALANCED_T", "ISCN 2024", 2, "Translocation déséquilibrée", "Translocation non équilibrée détectée explicitement."),
+    RuleSpec("ISCN.T_ALREADY_IN_DER", "ISCN 2024", 0, "Translocation déjà comptée", "Translocation explicite déjà incluse dans un chromosome dérivé."),
+    RuleSpec("ISCN.T_VIA_DER", "ISCN 2024", "1 ou 2", "Translocation via dérivé", "Translocation comptée à partir d'un chromosome dérivé."),
+    RuleSpec("ISCN.DER_T_COUNTED", "ISCN 2024", 0, "Dérivé associé déjà compté", "Dérivé associé à une translocation déjà comptabilisée."),
+    RuleSpec("ISCN.DER_BALANCED_T", "ISCN 2024", 0, "Dérivé de translocation équilibrée", "Dérivé issu d'une translocation équilibrée déjà représentée."),
+    RuleSpec("ISCN.INTERTWINED_DER_BALANCED", "ISCN 2024", "1 ou 2", "Dérivés enchevêtrés équilibrés", "Groupe de dérivés reliés avec cassures concordantes."),
+    RuleSpec("ISCN.INTERTWINED_DER_UNBALANCED", "ISCN 2024", 2, "Dérivés enchevêtrés déséquilibrés", "Groupe de dérivés reliés avec cassures non concordantes."),
+    RuleSpec("ISCN.INTERTWINED_DER_PART", "ISCN 2024", 0, "Partie d'un remaniement", "Dérivé déjà compté dans un remaniement enchevêtré."),
+    RuleSpec("ISCN.STRUCTURAL_GAIN_DUPLICATE", "ISCN 2024", 1, "Gain structural dupliqué", "Gain d'une anomalie structurale déjà décrite."),
+    RuleSpec("ISCN.SEMANTIC_PLUS_STRUCT", "ISCN 2024", 2, "Gain structural sémantique", "Notation +i(...) ou +del(...) interprétée comme gain chromosomique plus anomalie structurale."),
+    RuleSpec("ISCN.MAR", "ISCN 2024", 1, "Marqueur", "Chromosome marqueur."),
+    RuleSpec("ISCN.DICENTRIC", "ISCN 2024", 2, "Chromosome dicentrique", "Chromosome dicentrique compté comme remaniement complexe."),
+    RuleSpec("ISCN.DER_NO_BREAKPOINT", "ISCN 2024", 1, "Dérivé sans cassure", "Chromosome dérivé sans point de cassure détaillé."),
+    RuleSpec("ISCN.DER_MULTI", "ISCN 2024", 2, "Dérivé multichromosomique", "Chromosome dérivé impliquant au moins deux chromosomes identifiés."),
+    RuleSpec("ISCN.DER_MULTI_UNCERTAIN", "ISCN 2024", 2, "Dérivé multichromosomique incertain", "Dérivé impliquant plusieurs chromosomes avec positions incertaines."),
+    RuleSpec("ISCN.DER_UNCERTAIN_SECOND", "ISCN 2024", 1, "Dérivé avec second chromosome incertain", "Dérivé sans certitude sur l'implication d'un second chromosome."),
+    RuleSpec("ISCN.DER_SAME_CHR", "ISCN 2024", 1, "Dérivé intrachromosomique", "Chromosome dérivé issu du même chromosome."),
+    RuleSpec("ISCN.SINGLE_CHR_DESEQ", "ISCN 2024", 2, "Déséquilibre unichromosomique", "Tétrasomie, triplication, quadruplication ou isodérivé."),
+    RuleSpec("ISCN.COMPLEX_MULTI_CHR", "ISCN 2024", 2, "Déséquilibre multichromosomique", "Anomalie déséquilibrée impliquant plusieurs chromosomes."),
+    RuleSpec("ISCN.UNBALANCED_TRANSLOCATION", "ISCN 2024", 2, "Translocation déséquilibrée", "Translocation non pure ou portée par un dérivé."),
+    RuleSpec("ISCN.GAIN_LOSS_SIMPLE", "ISCN 2024", 1, "Gain/perte simple", "Gain ou perte chromosomique simple."),
+    RuleSpec("ISCN.OTHER_STANDARD", "ISCN 2024", 1, "Autre anomalie standard", "Anomalie non constitutionnelle non couverte par une règle plus spécifique."),
+    RuleSpec("JON.CONSTITUTIONAL", "Jondreville 2020", 0, "Anomalie constitutionnelle", "Anomalie notée constitutionnelle ou suspecte constitutionnelle."),
+    RuleSpec("JON.REPEAT_NOTATION", "Jondreville 2020", 0, "Notation de répétition", "Notation idem/sl/sdl déjà portée par un clone précédent."),
+    RuleSpec("JON.ABSENT_IN_REPEAT", "Jondreville 2020", "0 ou 1", "Absence dans un clone répété", "Anomalie indiquée absente dans un clone secondaire, avec exception pour perte chromosomique implicite."),
+    RuleSpec("JON.IMPLICIT", "Jondreville 2020", 0, "Anomalie implicite", "Duplication avec une anomalie de référence."),
+    RuleSpec("JON.MAR", "Jondreville 2020", 1, "Marqueur", "Chromosome marqueur."),
+    RuleSpec("JON.TRIPLOIDY", "Jondreville 2020", 0, "Triploïdie", "Triploïdie ignorée dans le calcul Jondreville."),
+    RuleSpec("JON.DEFAULT", "Jondreville 2020", 1, "Anomalie non constitutionnelle", "Chaque anomalie non constitutionnelle vaut un point."),
+)
+
+RULE_PRIORITY: dict[str, tuple[str, ...]] = {
+    "ISCN 2024": (
+        "ISCN.ABSENT_IN_REPEAT",
+        "ISCN.CONSTITUTIONAL",
+        "ISCN.REPEAT_NOTATION",
+        "ISCN.INTERTWINED_DER_BALANCED",
+        "ISCN.INTERTWINED_DER_UNBALANCED",
+        "ISCN.INTERTWINED_DER_PART",
+        "ISCN.BALANCED_T",
+        "ISCN.UNBALANCED_T",
+        "ISCN.T_ALREADY_IN_DER",
+        "ISCN.IMPLICIT",
+        "ISCN.STRUCTURAL_GAIN_DUPLICATE",
+        "ISCN.SEMANTIC_PLUS_STRUCT",
+        "ISCN.MAR",
+        "ISCN.DICENTRIC",
+        "ISCN.T_VIA_DER",
+        "ISCN.DER_T_COUNTED",
+        "ISCN.DER_BALANCED_T",
+        "ISCN.DER_NO_BREAKPOINT",
+        "ISCN.DER_MULTI",
+        "ISCN.DER_MULTI_UNCERTAIN",
+        "ISCN.DER_UNCERTAIN_SECOND",
+        "ISCN.DER_SAME_CHR",
+        "ISCN.SINGLE_CHR_DESEQ",
+        "ISCN.COMPLEX_MULTI_CHR",
+        "ISCN.UNBALANCED_TRANSLOCATION",
+        "ISCN.GAIN_LOSS_SIMPLE",
+        "ISCN.OTHER_STANDARD",
+    ),
+    "Jondreville 2020": (
+        "JON.ABSENT_IN_REPEAT",
+        "JON.CONSTITUTIONAL",
+        "JON.REPEAT_NOTATION",
+        "JON.IMPLICIT",
+        "JON.MAR",
+        "JON.TRIPLOIDY",
+        "JON.DEFAULT",
+    ),
+}
+
+RULE_BY_ID = {rule.rule_id: rule for rule in RULE_CATALOG}
+
+
+def get_rule_catalog_dataframe() -> pd.DataFrame:
+    """Retourne le référentiel des règles affichable/exportable."""
+
+    return pd.DataFrame(
+        [
+            {
+                "Rule ID": rule.rule_id,
+                "Référentiel": rule.system,
+                "Score par défaut": rule.default_score,
+                "Libellé": rule.title,
+                "Explication": rule.explanation,
+            }
+            for rule in RULE_CATALOG
+        ]
+    )
+
+
+def get_rule_path(rule_id: str) -> list[dict[str, object]]:
+    """Retourne le parcours de priorité menant à une règle retenue."""
+
+    if not rule_id:
+        return []
+
+    rule = RULE_BY_ID.get(rule_id)
+    system = rule.system if rule else ("Jondreville 2020" if rule_id.startswith("JON.") else "ISCN 2024")
+    priority = list(RULE_PRIORITY.get(system, ()))
+    if rule_id not in priority:
+        priority.append(rule_id)
+
+    path = []
+    for index, candidate_id in enumerate(priority, start=1):
+        candidate = RULE_BY_ID.get(candidate_id)
+        if not candidate:
+            title = candidate_id
+            score = ""
+            explanation = ""
+        else:
+            title = candidate.title
+            score = candidate.default_score
+            explanation = candidate.explanation
+        selected = candidate_id == rule_id
+        path.append(
+            {
+                "order": index,
+                "rule_id": candidate_id,
+                "title": title,
+                "default_score": score,
+                "explanation": explanation,
+                "selected": selected,
+            }
+        )
+        if selected:
+            break
+
+    return path
+
+
+@dataclass(frozen=True)
 class RuleDecision:
     rule_id: str
     score: int

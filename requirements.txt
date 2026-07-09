@@ -1,2 +1,4 @@
 pandas
 streamlit>=1.32
+openpyxl
+pyarrow

@@ -17,6 +17,7 @@ TEST_SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/"
     "1_QPAzEr3PNHaNVu8Qxuv_hWCUoBQqqRcNSnX-Q0Egm8/edit?gid=98233212#gid=98233212"
 )
+RULE_CATALOG_SHEET_URL = "http://docs.google.com/spreadsheets/d/1MkwGWtuRU53fuaZ61RejAapUZ1NIeZcIJwMuv7OaY4w/edit?gid=292168720#gid=292168720"
 
 # Configuration de la page
 st.set_page_config(
@@ -277,7 +278,7 @@ def format_anomalies_compact(anomalies_df):
         return "#9EA7B8"
 
     def build_rule_help(rule_id, applied_explanation):
-        path = get_rule_path(str(rule_id or ""))
+        path = get_rule_path(str(rule_id or ""), public_text_url=RULE_CATALOG_SHEET_URL or None)
         if not path:
             return ""
 
@@ -297,14 +298,34 @@ def format_anomalies_compact(anomalies_df):
             marker = "retenue" if selected else "testée avant"
             score_text = step.get("default_score")
             score_html = f" · score {html.escape(str(score_text))}" if score_text != "" else ""
+            open_attr = " open" if selected else ""
+            technical_check = str(step.get("technical_check") or "").strip()
+            technical_html = (
+                f'<div class="rule-detail-block"><strong>Critère technique :</strong> {html.escape(technical_check)}</div>'
+                if technical_check
+                else ""
+            )
+            explanation = str(step.get("explanation") or "").strip()
+            explanation_html = (
+                f'<div class="rule-detail-block"><strong>Explication clinique :</strong> {html.escape(explanation)}</div>'
+                if explanation
+                else ""
+            )
             items.append(
                 f'<li class="rule-step{step_class}">'
                 f'<span class="rule-step-order">{step["order"]}</span>'
+                f'<details class="rule-details"{open_attr}>'
+                f'<summary>'
                 f'<span><strong>{html.escape(str(step["rule_id"]))}</strong>'
                 f' <em>{html.escape(marker)}</em>{score_html}<br>'
-                f'{html.escape(str(step["title"]))}'
-                f'<small>{html.escape(str(step["explanation"]))}</small>'
-                f'</span></li>'
+                f'<span class="rule-title">{html.escape(str(step["title"]))}</span></span>'
+                f'</summary>'
+                f'<div class="rule-detail-panel">'
+                f'{explanation_html}'
+                f'{technical_html}'
+                f'</div>'
+                f'</details>'
+                f'</li>'
             )
 
         applied_html = ""
@@ -469,7 +490,17 @@ Cette application permet d'analyser des formules caryotypiques (notation ISCN) p
 """)
 
 with st.expander("Référentiel des règles de scoring"):
-    st.dataframe(get_rule_catalog_dataframe(), use_container_width=True, hide_index=True)
+    if RULE_CATALOG_SHEET_URL:
+        st.markdown(
+            f'<a href="{html.escape(RULE_CATALOG_SHEET_URL)}" target="_blank" '
+            'rel="noopener noreferrer">Ouvrir le Google Sheet du catalogue</a>',
+            unsafe_allow_html=True,
+        )
+    st.dataframe(
+        get_rule_catalog_dataframe(public_text_url=RULE_CATALOG_SHEET_URL or None),
+        width="stretch",
+        hide_index=True,
+    )
 
 # Création des onglets (par défaut: analyse d'un fichier)
 tab2, tab1 = st.tabs(["Analyse d'un fichier", "Analyse d'une formule"])
@@ -522,6 +553,11 @@ with tab1:
 # Onglet 2: Analyse d'un fichier
 with tab2:
     st.subheader("Chargez un fichier contenant des formules caryotypiques")
+    st.markdown(
+        f'<a href="{html.escape(TEST_SHEET_URL)}" target="_blank" '
+        'rel="noopener noreferrer">Ouvrir le Google Sheet des formules de test</a>',
+        unsafe_allow_html=True,
+    )
     remote_preview, remote_preview_err = load_google_sheet_preview(TEST_SHEET_URL)
     remote_button_label = preview_button_label(
         "Analyser le fichier de tests",
@@ -540,8 +576,8 @@ with tab2:
         )
 
     test_col, local_col = st.columns([1, 1], gap="small")
-    test_button = test_col.button(remote_button_label, use_container_width=True)
-    local_test_button = local_col.button(local_button_label, use_container_width=True)
+    test_button = test_col.button(remote_button_label, width="stretch")
+    local_test_button = local_col.button(local_button_label, width="stretch")
 
     show_local_uploader = st.session_state.get("show_local_myc_uploader", False)
     if show_local_uploader:
@@ -1314,7 +1350,7 @@ st.markdown("""
         display: grid;
         grid-template-columns: 24px 1fr;
         gap: 8px;
-        padding: 7px 0;
+        padding: 6px 0;
         border-top: 1px solid #eef2f7;
     }
 
@@ -1351,12 +1387,48 @@ st.markdown("""
         color: #065f46;
     }
 
-    .rule-step small {
-        display: block;
-        margin-top: 3px;
-        color: #64748b;
+    .rule-details {
+        min-width: 0;
+    }
+
+    .rule-details summary {
+        cursor: pointer;
+        list-style-position: outside;
+        color: #111827;
+    }
+
+    .rule-step.selected .rule-details summary {
+        color: #0f5132;
+        font-weight: 600;
+    }
+
+    .rule-title {
+        color: #334155;
+        font-size: 0.84rem;
+    }
+
+    .rule-detail-panel {
+        margin: 6px 0 0 14px;
+        padding: 7px 8px;
+        border-left: 2px solid #cbd5e1;
+        background-color: #f8fafc;
+        border-radius: 4px;
+    }
+
+    .rule-step.selected .rule-detail-panel {
+        border-left-color: #10b981;
+        background-color: #ecfdf5;
+    }
+
+    .rule-detail-block {
+        margin-top: 5px;
+        color: #475569;
         font-size: 0.78rem;
-        line-height: 1.35;
+        line-height: 1.38;
+    }
+
+    .rule-detail-block:first-child {
+        margin-top: 0;
     }
 
     .rule-applied {

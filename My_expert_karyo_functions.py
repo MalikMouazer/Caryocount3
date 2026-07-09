@@ -2,6 +2,8 @@ import re
 from collections import Counter
 import pandas as pd
 from dataclasses import dataclass
+import os
+from urllib.parse import parse_qs, urlparse
 
 # =========================
 # Parsing
@@ -511,6 +513,31 @@ def constitutional_status(norm: str) -> tuple[bool, str]:
     return False, ""
 
 
+def constitutional_rule_decision(system_prefix: str, norm: str) -> "RuleDecision | None":
+    """Retourne la règle constitutionnelle précise si ``norm`` en contient une."""
+
+    cleaned = norm.strip().lower()
+    if re.match(r"^\+\d+c$", cleaned):
+        return RuleDecision(
+            rule_id=f"{system_prefix}.CONSTITUTIONAL_GAIN",
+            score=0,
+            explanation="Gain constitutionnel",
+        )
+    if cleaned.endswith("?c"):
+        return RuleDecision(
+            rule_id=f"{system_prefix}.CONSTITUTIONAL_SUSPECT",
+            score=0,
+            explanation="Suspicion d'anomalie constitutionnelle (?c)",
+        )
+    if cleaned.endswith("c"):
+        return RuleDecision(
+            rule_id=f"{system_prefix}.CONSTITUTIONAL_CERTAIN",
+            score=0,
+            explanation="Anomalie constitutionnelle",
+        )
+    return None
+
+
 def append_uncertainty_note(anom: str, explanation: str) -> str:
     """Ajoute une mention d'imprécision si la notation contient un '?'."""
 
@@ -760,27 +787,38 @@ def detect_implicit_anomalies(anomalies, clone_map=None):
 class RuleSpec:
     rule_id: str
     system: str
-    default_score: int | str
+    default_score: int
     title: str
     explanation: str
 
 
+RULE_CATALOG_SHEET_ENV = "RULE_CATALOG_SHEET_URL"
+RULE_EDITABLE_COLUMNS = ("Libellé", "Explication")
+_RULE_TEXT_OVERRIDES_CACHE: dict[str, dict[str, dict[str, str]]] = {}
+
+
 RULE_CATALOG: tuple[RuleSpec, ...] = (
-    RuleSpec("ISCN.CONSTITUTIONAL", "ISCN 2024", 0, "Anomalie constitutionnelle", "Anomalie notée constitutionnelle ou suspecte constitutionnelle."),
+    RuleSpec("ISCN.CONSTITUTIONAL_GAIN", "ISCN 2024", 0, "Gain constitutionnel", "Gain chromosomique annoté constitutionnel."),
+    RuleSpec("ISCN.CONSTITUTIONAL_SUSPECT", "ISCN 2024", 0, "Suspicion constitutionnelle", "Anomalie annotée comme possiblement constitutionnelle."),
+    RuleSpec("ISCN.CONSTITUTIONAL_CERTAIN", "ISCN 2024", 0, "Anomalie constitutionnelle certaine", "Anomalie annotée constitutionnelle."),
     RuleSpec("ISCN.REPEAT_NOTATION", "ISCN 2024", 0, "Notation de répétition", "Notation idem/sl/sdl déjà portée par un clone précédent."),
-    RuleSpec("ISCN.ABSENT_IN_REPEAT", "ISCN 2024", "0 ou 1", "Absence dans un clone répété", "Anomalie indiquée absente dans un clone secondaire, avec exception pour perte chromosomique implicite."),
+    RuleSpec("ISCN.ABSENT_IN_REPEAT_ZERO", "ISCN 2024", 0, "Absence dans un clone répété", "Anomalie indiquée absente dans un clone secondaire et déjà comptée auparavant."),
+    RuleSpec("ISCN.ABSENT_IN_REPEAT_IMPLICIT_LOSS", "ISCN 2024", 1, "Perte implicite dans un clone répété", "Absence d'une anomalie structurale interprétée comme perte chromosomique implicite."),
     RuleSpec("ISCN.IMPLICIT", "ISCN 2024", 0, "Anomalie implicite", "Anomalie déjà expliquée par une anomalie de référence."),
     RuleSpec("ISCN.BALANCED_T", "ISCN 2024", 1, "Translocation équilibrée", "Translocation avec dérivés réciproques compatibles."),
     RuleSpec("ISCN.UNBALANCED_T", "ISCN 2024", 2, "Translocation déséquilibrée", "Translocation non équilibrée détectée explicitement."),
     RuleSpec("ISCN.T_ALREADY_IN_DER", "ISCN 2024", 0, "Translocation déjà comptée", "Translocation explicite déjà incluse dans un chromosome dérivé."),
-    RuleSpec("ISCN.T_VIA_DER", "ISCN 2024", "1 ou 2", "Translocation via dérivé", "Translocation comptée à partir d'un chromosome dérivé."),
+    RuleSpec("ISCN.T_VIA_DER_BALANCED", "ISCN 2024", 1, "Translocation équilibrée via dérivé", "Translocation équilibrée comptée à partir d'un chromosome dérivé."),
+    RuleSpec("ISCN.T_VIA_DER_UNBALANCED", "ISCN 2024", 2, "Translocation déséquilibrée via dérivé", "Translocation déséquilibrée comptée à partir d'un chromosome dérivé."),
     RuleSpec("ISCN.DER_T_COUNTED", "ISCN 2024", 0, "Dérivé associé déjà compté", "Dérivé associé à une translocation déjà comptabilisée."),
     RuleSpec("ISCN.DER_BALANCED_T", "ISCN 2024", 0, "Dérivé de translocation équilibrée", "Dérivé issu d'une translocation équilibrée déjà représentée."),
-    RuleSpec("ISCN.INTERTWINED_DER_BALANCED", "ISCN 2024", "1 ou 2", "Dérivés enchevêtrés équilibrés", "Groupe de dérivés reliés avec cassures concordantes."),
+    RuleSpec("ISCN.INTERTWINED_DER_BALANCED_SIMPLE", "ISCN 2024", 1, "Dérivés enchevêtrés équilibrés", "Groupe de dérivés reliés avec cassures concordantes."),
+    RuleSpec("ISCN.INTERTWINED_DER_BALANCED_INSERTION", "ISCN 2024", 2, "Dérivés enchevêtrés équilibrés avec insertion", "Groupe de dérivés reliés avec cassures concordantes et insertion additionnelle."),
     RuleSpec("ISCN.INTERTWINED_DER_UNBALANCED", "ISCN 2024", 2, "Dérivés enchevêtrés déséquilibrés", "Groupe de dérivés reliés avec cassures non concordantes."),
     RuleSpec("ISCN.INTERTWINED_DER_PART", "ISCN 2024", 0, "Partie d'un remaniement", "Dérivé déjà compté dans un remaniement enchevêtré."),
     RuleSpec("ISCN.STRUCTURAL_GAIN_DUPLICATE", "ISCN 2024", 1, "Gain structural dupliqué", "Gain d'une anomalie structurale déjà décrite."),
-    RuleSpec("ISCN.SEMANTIC_PLUS_STRUCT", "ISCN 2024", 2, "Gain structural sémantique", "Notation +i(...) ou +del(...) interprétée comme gain chromosomique plus anomalie structurale."),
+    RuleSpec("ISCN.SEMANTIC_PLUS_ISO", "ISCN 2024", 2, "Gain d'isochromosome", "Notation +i(...) interprétée comme gain chromosomique plus isochromosome."),
+    RuleSpec("ISCN.SEMANTIC_PLUS_DEL", "ISCN 2024", 2, "Gain de chromosome délété", "Notation +del(...) interprétée comme gain chromosomique plus délétion."),
     RuleSpec("ISCN.MAR", "ISCN 2024", 1, "Marqueur", "Chromosome marqueur."),
     RuleSpec("ISCN.DICENTRIC", "ISCN 2024", 2, "Chromosome dicentrique", "Chromosome dicentrique compté comme remaniement complexe."),
     RuleSpec("ISCN.DER_NO_BREAKPOINT", "ISCN 2024", 1, "Dérivé sans cassure", "Chromosome dérivé sans point de cassure détaillé."),
@@ -788,14 +826,20 @@ RULE_CATALOG: tuple[RuleSpec, ...] = (
     RuleSpec("ISCN.DER_MULTI_UNCERTAIN", "ISCN 2024", 2, "Dérivé multichromosomique incertain", "Dérivé impliquant plusieurs chromosomes avec positions incertaines."),
     RuleSpec("ISCN.DER_UNCERTAIN_SECOND", "ISCN 2024", 1, "Dérivé avec second chromosome incertain", "Dérivé sans certitude sur l'implication d'un second chromosome."),
     RuleSpec("ISCN.DER_SAME_CHR", "ISCN 2024", 1, "Dérivé intrachromosomique", "Chromosome dérivé issu du même chromosome."),
-    RuleSpec("ISCN.SINGLE_CHR_DESEQ", "ISCN 2024", 2, "Déséquilibre unichromosomique", "Tétrasomie, triplication, quadruplication ou isodérivé."),
+    RuleSpec("ISCN.SINGLE_CHR_GAIN_REPEAT", "ISCN 2024", 2, "Gain chromosomique répété", "Plusieurs gains du même chromosome dans la formule."),
+    RuleSpec("ISCN.SINGLE_CHR_TRIPLICATION", "ISCN 2024", 2, "Triplication", "Anomalie de triplication d'un chromosome ou segment."),
+    RuleSpec("ISCN.SINGLE_CHR_ISODERIVATIVE", "ISCN 2024", 2, "Isodérivé", "Chromosome isodérivé ou isodicentrique."),
     RuleSpec("ISCN.COMPLEX_MULTI_CHR", "ISCN 2024", 2, "Déséquilibre multichromosomique", "Anomalie déséquilibrée impliquant plusieurs chromosomes."),
     RuleSpec("ISCN.UNBALANCED_TRANSLOCATION", "ISCN 2024", 2, "Translocation déséquilibrée", "Translocation non pure ou portée par un dérivé."),
-    RuleSpec("ISCN.GAIN_LOSS_SIMPLE", "ISCN 2024", 1, "Gain/perte simple", "Gain ou perte chromosomique simple."),
+    RuleSpec("ISCN.GAIN_SIMPLE", "ISCN 2024", 1, "Gain simple", "Gain chromosomique simple."),
+    RuleSpec("ISCN.LOSS_SIMPLE", "ISCN 2024", 1, "Perte simple", "Perte chromosomique simple."),
     RuleSpec("ISCN.OTHER_STANDARD", "ISCN 2024", 1, "Autre anomalie standard", "Anomalie non constitutionnelle non couverte par une règle plus spécifique."),
-    RuleSpec("JON.CONSTITUTIONAL", "Jondreville 2020", 0, "Anomalie constitutionnelle", "Anomalie notée constitutionnelle ou suspecte constitutionnelle."),
+    RuleSpec("JON.CONSTITUTIONAL_GAIN", "Jondreville 2020", 0, "Gain constitutionnel", "Gain chromosomique annoté constitutionnel."),
+    RuleSpec("JON.CONSTITUTIONAL_SUSPECT", "Jondreville 2020", 0, "Suspicion constitutionnelle", "Anomalie annotée comme possiblement constitutionnelle."),
+    RuleSpec("JON.CONSTITUTIONAL_CERTAIN", "Jondreville 2020", 0, "Anomalie constitutionnelle certaine", "Anomalie annotée constitutionnelle."),
     RuleSpec("JON.REPEAT_NOTATION", "Jondreville 2020", 0, "Notation de répétition", "Notation idem/sl/sdl déjà portée par un clone précédent."),
-    RuleSpec("JON.ABSENT_IN_REPEAT", "Jondreville 2020", "0 ou 1", "Absence dans un clone répété", "Anomalie indiquée absente dans un clone secondaire, avec exception pour perte chromosomique implicite."),
+    RuleSpec("JON.ABSENT_IN_REPEAT_ZERO", "Jondreville 2020", 0, "Absence dans un clone répété", "Anomalie indiquée absente dans un clone secondaire et déjà comptée auparavant."),
+    RuleSpec("JON.ABSENT_IN_REPEAT_IMPLICIT_LOSS", "Jondreville 2020", 1, "Perte implicite dans un clone répété", "Absence d'une anomalie structurale interprétée comme perte chromosomique implicite."),
     RuleSpec("JON.IMPLICIT", "Jondreville 2020", 0, "Anomalie implicite", "Duplication avec une anomalie de référence."),
     RuleSpec("JON.MAR", "Jondreville 2020", 1, "Marqueur", "Chromosome marqueur."),
     RuleSpec("JON.TRIPLOIDY", "Jondreville 2020", 0, "Triploïdie", "Triploïdie ignorée dans le calcul Jondreville."),
@@ -804,10 +848,14 @@ RULE_CATALOG: tuple[RuleSpec, ...] = (
 
 RULE_PRIORITY: dict[str, tuple[str, ...]] = {
     "ISCN 2024": (
-        "ISCN.ABSENT_IN_REPEAT",
-        "ISCN.CONSTITUTIONAL",
+        "ISCN.ABSENT_IN_REPEAT_ZERO",
+        "ISCN.ABSENT_IN_REPEAT_IMPLICIT_LOSS",
+        "ISCN.CONSTITUTIONAL_GAIN",
+        "ISCN.CONSTITUTIONAL_SUSPECT",
+        "ISCN.CONSTITUTIONAL_CERTAIN",
         "ISCN.REPEAT_NOTATION",
-        "ISCN.INTERTWINED_DER_BALANCED",
+        "ISCN.INTERTWINED_DER_BALANCED_SIMPLE",
+        "ISCN.INTERTWINED_DER_BALANCED_INSERTION",
         "ISCN.INTERTWINED_DER_UNBALANCED",
         "ISCN.INTERTWINED_DER_PART",
         "ISCN.BALANCED_T",
@@ -815,10 +863,12 @@ RULE_PRIORITY: dict[str, tuple[str, ...]] = {
         "ISCN.T_ALREADY_IN_DER",
         "ISCN.IMPLICIT",
         "ISCN.STRUCTURAL_GAIN_DUPLICATE",
-        "ISCN.SEMANTIC_PLUS_STRUCT",
+        "ISCN.SEMANTIC_PLUS_ISO",
+        "ISCN.SEMANTIC_PLUS_DEL",
         "ISCN.MAR",
         "ISCN.DICENTRIC",
-        "ISCN.T_VIA_DER",
+        "ISCN.T_VIA_DER_BALANCED",
+        "ISCN.T_VIA_DER_UNBALANCED",
         "ISCN.DER_T_COUNTED",
         "ISCN.DER_BALANCED_T",
         "ISCN.DER_NO_BREAKPOINT",
@@ -826,15 +876,21 @@ RULE_PRIORITY: dict[str, tuple[str, ...]] = {
         "ISCN.DER_MULTI_UNCERTAIN",
         "ISCN.DER_UNCERTAIN_SECOND",
         "ISCN.DER_SAME_CHR",
-        "ISCN.SINGLE_CHR_DESEQ",
+        "ISCN.SINGLE_CHR_GAIN_REPEAT",
+        "ISCN.SINGLE_CHR_TRIPLICATION",
+        "ISCN.SINGLE_CHR_ISODERIVATIVE",
         "ISCN.COMPLEX_MULTI_CHR",
         "ISCN.UNBALANCED_TRANSLOCATION",
-        "ISCN.GAIN_LOSS_SIMPLE",
+        "ISCN.GAIN_SIMPLE",
+        "ISCN.LOSS_SIMPLE",
         "ISCN.OTHER_STANDARD",
     ),
     "Jondreville 2020": (
-        "JON.ABSENT_IN_REPEAT",
-        "JON.CONSTITUTIONAL",
+        "JON.ABSENT_IN_REPEAT_ZERO",
+        "JON.ABSENT_IN_REPEAT_IMPLICIT_LOSS",
+        "JON.CONSTITUTIONAL_GAIN",
+        "JON.CONSTITUTIONAL_SUSPECT",
+        "JON.CONSTITUTIONAL_CERTAIN",
         "JON.REPEAT_NOTATION",
         "JON.IMPLICIT",
         "JON.MAR",
@@ -845,31 +901,226 @@ RULE_PRIORITY: dict[str, tuple[str, ...]] = {
 
 RULE_BY_ID = {rule.rule_id: rule for rule in RULE_CATALOG}
 
+RULE_TECHNICAL_CHECKS: dict[str, str] = {
+    "ISCN.CONSTITUTIONAL_GAIN": "Le code normalise l'anomalie puis teste la regex ^\\+\\d+c$. En langage courant: le texte doit commencer par '+', contenir ensuite un ou plusieurs chiffres, puis finir par 'c'. Exemple: '+8c'. Le 'c' indique constitutionnel. Cette règle concerne donc un gain chromosomique annoté constitutionnel. Score 0.",
+    "ISCN.CONSTITUTIONAL_SUSPECT": "Le code normalise l'anomalie puis vérifie si le texte finit exactement par '?c'. Le '?' indique une incertitude dans la notation et le 'c' indique constitutionnel; ensemble, le code l'interprète comme suspicion d'anomalie constitutionnelle. Cette règle est séparée pour permettre une explication clinique propre. Score 0.",
+    "ISCN.CONSTITUTIONAL_CERTAIN": "Le code normalise l'anomalie puis vérifie si le texte finit par 'c', après avoir déjà exclu les cas '+<nombre>c' et '?c'. Cela correspond aux autres anomalies annotées constitutionnelles certaines. Score 0.",
+    "ISCN.REPEAT_NOTATION": "Le code met le texte en minuscules puis teste les notations qui ne décrivent pas une nouvelle anomalie mais renvoient à un clone précédent. 'idem' est accepté tel quel. La regex ^(?:sl|sdl)\\d*$ veut dire: début du texte (^), puis soit 'sl' soit 'sdl' ((?:sl|sdl)), puis éventuellement des chiffres (\\d*), puis fin du texte ($). Exemples retenus: sl, sl2, sdl, sdl3. Score 0 car l'anomalie est déjà portée par une notation précédente.",
+    "ISCN.ABSENT_IN_REPEAT_ZERO": "Avant le scoring, l'analyse des clones repère une anomalie héritée d'un clone précédent mais explicitement absente dans le clone courant. Elle est stockée dans zeroed_reasons avec score_override=0. Le score est donc forcé à 0 et les règles suivantes ne sont pas testées pour cette anomalie.",
+    "ISCN.ABSENT_IN_REPEAT_IMPLICIT_LOSS": "Même mécanisme que ABSENT_IN_REPEAT_ZERO, mais l'anomalie absente est une anomalie structurale dont l'absence est interprétée comme perte chromosomique implicite: der(...), dic(...), add(...) ou certains r(...). Elle est stockée avec score_override=1. Score 1.",
+    "ISCN.IMPLICIT": "Le code cherche si l'anomalie est déjà expliquée par une autre anomalie de référence. Il normalise les écritures, compare les répétitions structurales del/dup/add/ins/inv avec points de cassure compatibles, repère les gains/pertes simples expliqués par un dérivé multi-chromosomique, et regroupe certains dérivés qui impliquent le même ensemble de chromosomes. Si une référence existe, cette anomalie vaut 0 pour éviter un double comptage.",
+    "ISCN.BALANCED_T": "Le code traite d'abord une anomalie écrite t(...). Il extrait les chromosomes de la translocation, par exemple t(9;22) donne la clé {9,22}. Ensuite il cherche dans le même clone des der(...)/ider(...) qui portent la même translocation. La règle équilibrée est retenue seulement s'il existe au moins deux chromosomes d'ancrage différents, au moins un der(...), et des points de cassure absents ou identiques, sans '?' dans les cassures. Score 1.",
+    "ISCN.UNBALANCED_T": "Le code part aussi d'une anomalie t(...). Il extrait la même clé chromosomique que pour BALANCED_T. Si une relation avec un dérivé du même clone existe, mais que les critères d'équilibre ne sont pas remplis (ancrages insuffisants, cassures discordantes ou incertaines), la translocation est considérée déséquilibrée. Score 2.",
+    "ISCN.T_ALREADY_IN_DER": "Quand une translocation t(...) est écrite explicitement, le code vérifie si un der(...) du même clone contient déjà une t(...) avec exactement les mêmes chromosomes. Exemple: t(9;22) et der(22)t(9;22) dans le même clone. Si oui, la translocation explicite vaut 0 car elle est déjà représentée par le dérivé.",
+    "ISCN.T_VIA_DER_BALANCED": "Si l'anomalie est un der(...) contenant une t(...), le code extrait les chromosomes de cette t(...), vérifie qu'au moins deux chromosomes connus sont présents, sans '?', et que la translocation n'a pas déjà été comptée. Si la même clé de translocation est reconnue comme équilibrée dans le clone, le dérivé sert à compter une translocation équilibrée. Score 1.",
+    "ISCN.T_VIA_DER_UNBALANCED": "Même détection que T_VIA_DER_BALANCED, mais la clé de translocation portée par le dérivé n'est pas reconnue comme équilibrée dans le clone. Le dérivé sert donc à compter une translocation déséquilibrée. Score 2.",
+    "ISCN.DER_T_COUNTED": "Pour un der(...) contenant une t(...), le code regarde si la même translocation a déjà été comptée dans le clone. Il compare une clé composée des chromosomes de t(...), par exemple {9,22}. Si cette clé est déjà présente dans les translocations explicites ou déjà comptées, le dérivé vaut 0 pour éviter de compter deux fois le même événement.",
+    "ISCN.DER_BALANCED_T": "Le code identifie un der(...) qui fait partie d'une translocation équilibrée déjà reconstruite par paire de dérivés. Il vérifie aussi que le dérivé ne contient pas de composant additionnel comme add(...), del(...), dup(...), ins(...), inv(...) ou r(...). Si c'est juste la représentation du dérivé équilibré déjà pris en compte, score 0.",
+    "ISCN.INTERTWINED_DER_BALANCED_SIMPLE": "Dans un même clone, le code regroupe au moins trois der(...)/dic(...) qui partagent des chromosomes. Il exige au moins trois chromosomes impliqués, trois ancrages cohérents, et des signatures 'chromosome + point de cassure' retrouvées au moins deux fois et couvrant le groupe. Sans insertion détectée, le groupe équilibré vaut 1.",
+    "ISCN.INTERTWINED_DER_BALANCED_INSERTION": "Même groupe équilibré que INTERTWINED_DER_BALANCED_SIMPLE, mais le code détecte aussi une insertion: présence de ins(...) ou implication d'au moins trois chromosomes dans un composant. Le score est augmenté à 2 pour porter cette complexité additionnelle.",
+    "ISCN.INTERTWINED_DER_UNBALANCED": "Même recherche de groupe que INTERTWINED_DER_BALANCED: au moins trois der(...)/dic(...) reliés dans le même clone. Ici, les cassures ne sont pas suffisamment concordantes pour conclure à un équilibre exact. Le code accepte au moins deux signatures de cassure supportées, y compris avec incertitude '?'. Le groupe est alors considéré déséquilibré. Score 2.",
+    "ISCN.INTERTWINED_DER_PART": "Une fois qu'un groupe de dérivés enchevêtrés est détecté, le code choisit la première anomalie du groupe comme porteuse du score. Les autres dérivés du même groupe reçoivent cette règle avec score 0, car ils font partie du même remaniement déjà compté.",
+    "ISCN.STRUCTURAL_GAIN_DUPLICATE": "Le code ne regarde cette règle que si l'anomalie commence par '+'. Il enlève le '+' et la multiplicité éventuelle xN/×N, puis obtient une base structurale comme der(...), dic(...), del(...), dup(...), inv(...), ins(...), add(...), i(...), ider(...), idic(...) ou r(...). Il cherche si la même base structurale est déjà apparue avant dans la formule. Si oui, le '+' correspond à un gain d'une anomalie structurale déjà décrite. Score 1.",
+    "ISCN.SEMANTIC_PLUS_ISO": "Le code traite une anomalie commençant par '+'. Après retrait du '+', si la base commence par i(...), il interprète '+i(...)' comme deux informations: gain du chromosome concerné plus isochromosome. Score 2.",
+    "ISCN.SEMANTIC_PLUS_DEL": "Le code traite une anomalie commençant par '+'. Après retrait du '+', si la base commence par del(...), il interprète '+del(...)' comme deux informations: gain du chromosome concerné plus délétion. Score 2.",
+    "ISCN.MAR": "Le code enlève d'abord le signe '+' ou '-' et une multiplicité finale xN/×N. Il met en minuscules puis teste si la base commence par 'mar' ou finit par 'mar'. Il reconnaît aussi les quantités implicites: '+2mar' signifie deux marqueurs, '+1~3mar' prend le maximum 3, '+mar1x2' signifie le marqueur 1 répété deux fois. Chaque marqueur retenu est scoré selon la logique marqueur.",
+    "ISCN.DICENTRIC": "Après normalisation, retrait du signe et retrait d'une multiplicité xN/×N, le code teste simplement si le texte commence par 'dic'. Cela correspond à une notation de chromosome dicentrique, par exemple dic(9;20). Score 2.",
+    "ISCN.DER_NO_BREAKPOINT": "Le code applique la regex ^der\\([^)]+\\)$ sur la base sans signe ni multiplicité. Elle veut dire: début du texte (^), puis 'der(', puis au moins un caractère qui n'est pas ')' ([^)]+), puis ')', puis fin du texte ($). Donc der(7) passe, mais der(7)(p10q10) ne passe pas car il contient une seconde parenthèse de cassure. Score 1.",
+    "ISCN.DER_MULTI": "Pour un der(...), le code extrait les chromosomes mentionnés après des mots-clés comme der, dic, del, dup, ins, t, i, ider, idic ou r, et aussi les chromosomes écrits dans la seconde parenthèse des dérivés. Les '?' sont exclus du compte des chromosomes connus. Si au moins deux chromosomes connus sont trouvés et que la notation n'est pas incertaine, le dérivé est multi-chromosomique. Score 2.",
+    "ISCN.DER_MULTI_UNCERTAIN": "Même extraction que DER_MULTI, mais le texte contient un '?'. Le code garde la règle multi-chromosomique si au moins deux chromosomes connus sont présents, tout en signalant que la notation est incertaine. Score 2, avec une explication d'imprécision.",
+    "ISCN.DER_UNCERTAIN_SECOND": "Pour un der(...), le code extrait les chromosomes connus et cherche le caractère '?'. Si un seul chromosome certain est retrouvé mais qu'un '?' est présent, le code comprend qu'un second chromosome pourrait être impliqué sans certitude. Score 1.",
+    "ISCN.DER_SAME_CHR": "Cette règle est le cas restant pour der(...). Elle arrive après exclusion des translocations déjà traitées, des der(...) sans cassure, des dérivés multi-chromosomiques et des dérivés avec second chromosome incertain. Le code considère alors que le dérivé concerne le même chromosome ou un remaniement intrachromosomique. Score 1.",
+    "ISCN.SINGLE_CHR_GAIN_REPEAT": "Le code détecte une anomalie commençant par '+' répétée plus d'une fois après normalisation, par exemple deux occurrences de +8. Cela correspond à un gain répété du même chromosome. Score 2, plafonné pour éviter de multiplier artificiellement le score par le nombre d'occurrences.",
+    "ISCN.SINGLE_CHR_TRIPLICATION": "Après retrait éventuel du signe et normalisation, le code teste si l'anomalie commence par 'trp'. Cela correspond à une triplication. Score 2.",
+    "ISCN.SINGLE_CHR_ISODERIVATIVE": "Après normalisation, le code teste si l'anomalie commence par 'ider'. Cela correspond à un chromosome isodérivé ou isodicentrique. Score 2.",
+    "ISCN.COMPLEX_MULTI_CHR": "Le code extrait d'abord les chromosomes connus. S'il y en a zéro ou un, la règle ne s'applique pas. S'il y en a au moins deux, il teste ensuite des formes déséquilibrées complexes: dic(...), r(...), insertion non équilibrée, ou translocation non équilibrée. Pour der(...), il exclut d'abord les formes der(...) sans cassure car elles ne prouvent pas clairement plusieurs chromosomes. Score 2.",
+    "ISCN.UNBALANCED_TRANSLOCATION": "Le code considère deux situations. Première situation: le texte contient der(...) ou dic(...) et contient aussi t(...), donc une translocation portée par un dérivé/dicentrique. Deuxième situation: le texte contient t(...) mais n'est pas une translocation pure équilibrée de forme t(chromosome;chromosome)(points de cassure), sans der, sans '+' et sans '-'. Score 2.",
+    "ISCN.GAIN_SIMPLE": "Cette règle arrive tard. Si aucune règle plus spécifique n'a retenu l'anomalie et que le texte normalisé commence par '+', le code la considère comme gain chromosomique simple. Score 1.",
+    "ISCN.LOSS_SIMPLE": "Cette règle arrive tard. Si aucune règle plus spécifique n'a retenu l'anomalie et que le texte normalisé commence par '-', le code la considère comme perte chromosomique simple. Score 1.",
+    "ISCN.OTHER_STANDARD": "Dernier recours ISCN. Si l'anomalie n'est pas constitutionnelle, pas répétée, pas implicite, pas marqueur, pas dérivé traité, pas déséquilibre identifié par les règles précédentes, le code applique le score standard. Score 1.",
+    "JON.CONSTITUTIONAL_GAIN": "Même détection que ISCN.CONSTITUTIONAL_GAIN: regex ^\\+\\d+c$, c'est-à-dire '+', puis un ou plusieurs chiffres, puis 'c' en fin de texte. Exemple '+8c'. Jondreville attribue 0 point.",
+    "JON.CONSTITUTIONAL_SUSPECT": "Même détection que ISCN.CONSTITUTIONAL_SUSPECT: le texte normalisé finit par '?c'. Le code distingue ce cas pour afficher une explication clinique spécifique à une suspicion constitutionnelle. Score 0.",
+    "JON.CONSTITUTIONAL_CERTAIN": "Même détection que ISCN.CONSTITUTIONAL_CERTAIN: le texte normalisé finit par 'c', hors cas '+<nombre>c' et '?c' déjà traités. Score 0.",
+    "JON.REPEAT_NOTATION": "Même logique que ISCN.REPEAT_NOTATION. Le code reconnaît 'idem' ou les formes sl/sdl avec numéro optionnel par la regex ^(?:sl|sdl)\\d*$. Ce sont des renvois à un clone précédent, pas de nouvelles anomalies à scorer. Score 0.",
+    "JON.ABSENT_IN_REPEAT_ZERO": "Même source que ISCN.ABSENT_IN_REPEAT_ZERO: anomalie héritée d'un clone précédent puis indiquée absente dans le clone courant. zeroed_reasons impose score_override=0. Score 0.",
+    "JON.ABSENT_IN_REPEAT_IMPLICIT_LOSS": "Même source que ISCN.ABSENT_IN_REPEAT_IMPLICIT_LOSS: absence d'une anomalie structurale interprétée comme perte chromosomique implicite dans un clone répété. zeroed_reasons impose score_override=1. Score 1.",
+    "JON.IMPLICIT": "Pour Jondreville, le code ne met à 0 que les anomalies classées comme 'Duplication avec l'anomalie de référence'. Cela évite de recompter une anomalie déjà représentée dans un clone ou une anomalie structurale précédente. Les autres implicites ne sont pas tous traités de la même façon qu'en ISCN.",
+    "JON.MAR": "Même détection technique que ISCN.MAR: retrait du signe et de la multiplicité, passage en minuscules, puis test 'commence par mar' ou 'finit par mar'. Les marqueurs sont reconnus même dans des formes quantifiées comme +2mar ou +mar1x2. Score 1 par règle Jondreville.",
+    "JON.TRIPLOIDY": "Après normalisation complète, le code compare exactement le texte à 'triploidy' en minuscules. Il n'utilise pas de synonymes ni de regex ici: seule cette chaîne exacte déclenche la règle. Score 0 dans le calcul Jondreville.",
+    "JON.DEFAULT": "Dernier recours Jondreville. Si aucune règle précédente ne s'applique, donc pas constitutionnel, pas répétition, pas implicite retenu, pas marqueur et pas triploïdie, le code compte l'anomalie comme anomalie non constitutionnelle standard. Score 1.",
+}
 
-def get_rule_catalog_dataframe() -> pd.DataFrame:
+
+def _google_sheet_csv_url(url_or_id: str) -> str:
+    """Construit l'URL CSV publique d'un Google Sheet depuis une URL ou un ID."""
+
+    source = str(url_or_id or "").strip()
+    if not source:
+        return ""
+    if "docs.google.com" not in source:
+        return f"https://docs.google.com/spreadsheets/d/{source}/export?format=csv&gid=0"
+
+    parsed = urlparse(source)
+    match = re.search(r"/d/([A-Za-z0-9_-]+)", parsed.path)
+    if not match:
+        return source
+    sheet_id = match.group(1)
+    query = parse_qs(parsed.query)
+    gid = query.get("gid", ["0"])[0]
+    if not gid and parsed.fragment:
+        gid = parse_qs(parsed.fragment).get("gid", ["0"])[0]
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid or '0'}"
+
+
+def _normalize_rule_catalog_columns(df: pd.DataFrame) -> pd.DataFrame:
+    aliases = {
+        "rule id": "Rule ID",
+        "rule_id": "Rule ID",
+        "id": "Rule ID",
+        "libelle": "Libellé",
+        "libellé": "Libellé",
+        "label": "Libellé",
+        "title": "Libellé",
+        "explication": "Explication",
+        "explanation": "Explication",
+    }
+    return df.rename(
+        columns={
+            col: aliases.get(str(col).strip().lower(), str(col).strip())
+            for col in df.columns
+        }
+    )
+
+
+def load_rule_catalog_public_texts(url_or_id: str | None = None) -> dict[str, dict[str, str]]:
+    """Charge uniquement les textes publics modifiables du catalogue."""
+
+    source = url_or_id or os.environ.get(RULE_CATALOG_SHEET_ENV, "")
+    if not source:
+        return {}
+    if source in _RULE_TEXT_OVERRIDES_CACHE:
+        return _RULE_TEXT_OVERRIDES_CACHE[source]
+
+    df = pd.read_csv(_google_sheet_csv_url(source))
+    df = _normalize_rule_catalog_columns(df)
+    if "Rule ID" not in df.columns:
+        raise ValueError("La feuille des règles doit contenir une colonne 'Rule ID'.")
+
+    allowed_ids = set(RULE_BY_ID)
+    overrides: dict[str, dict[str, str]] = {}
+    unknown_ids: list[str] = []
+    for _, row in df.iterrows():
+        rule_id = str(row.get("Rule ID", "")).strip()
+        if not rule_id:
+            continue
+        if rule_id not in allowed_ids:
+            unknown_ids.append(rule_id)
+            continue
+
+        editable: dict[str, str] = {}
+        for col in RULE_EDITABLE_COLUMNS:
+            if col not in df.columns:
+                continue
+            value = row.get(col)
+            if pd.isna(value):
+                continue
+            text = str(value).strip()
+            if text:
+                editable[col] = text
+        if editable:
+            overrides[rule_id] = editable
+
+    if unknown_ids:
+        raise ValueError(
+            "La feuille des règles contient des Rule ID inconnus: "
+            + ", ".join(sorted(set(unknown_ids)))
+        )
+    _RULE_TEXT_OVERRIDES_CACHE[source] = overrides
+    return overrides
+
+
+def _public_rule_text_overrides() -> dict[str, dict[str, str]]:
+    try:
+        return load_rule_catalog_public_texts()
+    except Exception:
+        return {}
+
+
+def _rule_with_public_text(rule: RuleSpec, overrides: dict[str, dict[str, str]]) -> RuleSpec:
+    override = overrides.get(rule.rule_id, {})
+    return RuleSpec(
+        rule.rule_id,
+        rule.system,
+        rule.default_score,
+        override.get("Libellé", rule.title),
+        override.get("Explication", rule.explanation),
+    )
+
+
+def validate_rule_catalog_integrity() -> None:
+    """Vérifie que le catalogue canonique et l'ordre de priorité restent cohérents."""
+
+    catalog_ids = [rule.rule_id for rule in RULE_CATALOG]
+    duplicate_ids = sorted({rule_id for rule_id in catalog_ids if catalog_ids.count(rule_id) > 1})
+    if duplicate_ids:
+        raise ValueError("Rule ID dupliqués: " + ", ".join(duplicate_ids))
+
+    catalog_id_set = set(catalog_ids)
+    priority_ids = {rule_id for priority in RULE_PRIORITY.values() for rule_id in priority}
+    missing_from_catalog = sorted(priority_ids - catalog_id_set)
+    if missing_from_catalog:
+        raise ValueError(
+            "Rule ID présents dans RULE_PRIORITY mais absents du catalogue: "
+            + ", ".join(missing_from_catalog)
+        )
+
+    missing_from_priority = sorted(catalog_id_set - priority_ids)
+    if missing_from_priority:
+        raise ValueError(
+            "Rule ID présents dans le catalogue mais absents de RULE_PRIORITY: "
+            + ", ".join(missing_from_priority)
+        )
+
+
+def get_rule_catalog_dataframe(public_text_url: str | None = None) -> pd.DataFrame:
     """Retourne le référentiel des règles affichable/exportable."""
 
+    overrides = (
+        load_rule_catalog_public_texts(public_text_url)
+        if public_text_url
+        else _public_rule_text_overrides()
+    )
     return pd.DataFrame(
         [
             {
-                "Rule ID": rule.rule_id,
-                "Référentiel": rule.system,
-                "Score par défaut": rule.default_score,
-                "Libellé": rule.title,
-                "Explication": rule.explanation,
+                "Rule ID": displayed.rule_id,
+                "Référentiel": displayed.system,
+                "Score par défaut": displayed.default_score,
+                "Critère technique": RULE_TECHNICAL_CHECKS.get(displayed.rule_id, ""),
+                "Libellé": displayed.title,
+                "Explication": displayed.explanation,
             }
-            for rule in RULE_CATALOG
+            for displayed in (
+                _rule_with_public_text(rule, overrides) for rule in RULE_CATALOG
+            )
         ]
     )
 
 
-def get_rule_path(rule_id: str) -> list[dict[str, object]]:
+def get_rule_path(rule_id: str, public_text_url: str | None = None) -> list[dict[str, object]]:
     """Retourne le parcours de priorité menant à une règle retenue."""
 
     if not rule_id:
         return []
 
+    overrides = (
+        load_rule_catalog_public_texts(public_text_url)
+        if public_text_url
+        else _public_rule_text_overrides()
+    )
     rule = RULE_BY_ID.get(rule_id)
+    if rule:
+        rule = _rule_with_public_text(rule, overrides)
     system = rule.system if rule else ("Jondreville 2020" if rule_id.startswith("JON.") else "ISCN 2024")
     priority = list(RULE_PRIORITY.get(system, ()))
     if rule_id not in priority:
@@ -883,6 +1134,7 @@ def get_rule_path(rule_id: str) -> list[dict[str, object]]:
             score = ""
             explanation = ""
         else:
+            candidate = _rule_with_public_text(candidate, overrides)
             title = candidate.title
             score = candidate.default_score
             explanation = candidate.explanation
@@ -893,6 +1145,7 @@ def get_rule_path(rule_id: str) -> list[dict[str, object]]:
                 "rule_id": candidate_id,
                 "title": title,
                 "default_score": score,
+                "technical_check": RULE_TECHNICAL_CHECKS.get(candidate_id, ""),
                 "explanation": explanation,
                 "selected": selected,
             }
@@ -913,6 +1166,41 @@ class RuleDecision:
 def apply_rule(condition: bool, rule_id: str, score: int, explanation: str) -> RuleDecision | None:
     if condition:
         return RuleDecision(rule_id=rule_id, score=score, explanation=explanation)
+    return None
+
+
+def absent_in_repeat_rule_decision(prefix: str, score: int, reason: str) -> RuleDecision:
+    rule_suffix = (
+        "ABSENT_IN_REPEAT_IMPLICIT_LOSS"
+        if score == 1 or "Perte chromosomique implicite" in reason
+        else "ABSENT_IN_REPEAT_ZERO"
+    )
+    return RuleDecision(
+        rule_id=f"{prefix}.{rule_suffix}",
+        score=score,
+        explanation=reason,
+    )
+
+
+def single_chr_deseq_rule_decision(norm: str, count: int) -> RuleDecision | None:
+    if norm.startswith("+") and count > 1:
+        return RuleDecision(
+            rule_id="ISCN.SINGLE_CHR_GAIN_REPEAT",
+            score=2,
+            explanation="Gain chromosomique répété",
+        )
+    if norm.startswith("trp"):
+        return RuleDecision(
+            rule_id="ISCN.SINGLE_CHR_TRIPLICATION",
+            score=2,
+            explanation="Triplication",
+        )
+    if norm.startswith("ider"):
+        return RuleDecision(
+            rule_id="ISCN.SINGLE_CHR_ISODERIVATIVE",
+            score=2,
+            explanation="Isodérivé",
+        )
     return None
 
 
@@ -958,24 +1246,14 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons:
         norm = normalize_anomaly(anom)
         eff_cnt = effective_occurrences(anom, cnt, clone_map)
         # Ignorer les anomalies constitutionnelles (+Nc)
-        is_constitutional, const_expl = constitutional_status(norm)
         zeroed_entry = None
         if zeroed_reasons:
             zeroed_entry = zeroed_reasons.get(anom) or zeroed_reasons.get(normalize_anomaly(anom))
         if zeroed_entry:
             override_score, reason = zeroed_entry
-            decision = RuleDecision(
-                rule_id="JON.ABSENT_IN_REPEAT",
-                score=override_score,
-                explanation=reason,
-            )
+            decision = absent_in_repeat_rule_decision("JON", override_score, reason)
         else:
-            decision = apply_rule(
-                is_constitutional,
-                "JON.CONSTITUTIONAL",
-                0,
-                const_expl,
-            )
+            decision = constitutional_rule_decision("JON", norm)
         if decision is None:
             decision = apply_rule(
                 is_repeat_notation(norm),
@@ -1021,7 +1299,7 @@ def calcul_score_jondroville(anomalies, clone_map, entries=None, zeroed_reasons:
             explanation = jon_dup_expl[anom]
         explanation = append_uncertainty_note(anom, explanation)
         score = score_per_occurrence * eff_cnt
-        if decision.rule_id == "JON.ABSENT_IN_REPEAT":
+        if decision.rule_id.startswith("JON.ABSENT_IN_REPEAT"):
             if decision.score == 1:
                 score = 1
             elif "Perte chromosomique implicite" in explanation:
@@ -1333,7 +1611,11 @@ def calcul_score_iscn(
                 )
                 primary, _ = component_items[0]
                 if is_exact:
-                    rule_id = "ISCN.INTERTWINED_DER_BALANCED"
+                    rule_id = (
+                        "ISCN.INTERTWINED_DER_BALANCED_INSERTION"
+                        if insertion
+                        else "ISCN.INTERTWINED_DER_BALANCED_SIMPLE"
+                    )
                     score = 2 if insertion else 1
                     explanation = "Dérivés enchevêtrés équilibrés"
                     if insertion:
@@ -1429,24 +1711,14 @@ def calcul_score_iscn(
         eff_cnt = effective_occurrences(anom, cnt, clone_map)
 
         # a) Constitutionnelles (+Nc) → ISCN = 0
-        is_constitutional, const_expl = constitutional_status(norm)
         zeroed_entry = None
         if zeroed_reasons:
             zeroed_entry = zeroed_reasons.get(anom) or zeroed_reasons.get(normalize_anomaly(anom))
         if zeroed_entry:
             override_score, reason = zeroed_entry
-            decision = RuleDecision(
-                rule_id="ISCN.ABSENT_IN_REPEAT",
-                score=override_score,
-                explanation=reason,
-            )
+            decision = absent_in_repeat_rule_decision("ISCN", override_score, reason)
         else:
-            decision = apply_rule(
-                is_constitutional,
-                "ISCN.CONSTITUTIONAL",
-                0,
-                const_expl,
-            )
+            decision = constitutional_rule_decision("ISCN", norm)
 
         if decision is None:
             decision = apply_rule(
@@ -1517,7 +1789,7 @@ def calcul_score_iscn(
                 if chr_label:
                     expl = f"{expl} (chr {chr_label})"
                 decision = RuleDecision(
-                    rule_id="ISCN.SEMANTIC_PLUS_STRUCT",
+                    rule_id="ISCN.SEMANTIC_PLUS_ISO" if base_core.startswith("i(") else "ISCN.SEMANTIC_PLUS_DEL",
                     score=2,
                     explanation=expl,
                 )
@@ -1567,7 +1839,7 @@ def calcul_score_iscn(
                     )
                 elif chosen_key not in counted_t_keys.get(chosen_clone, set()):
                     decision = RuleDecision(
-                        rule_id="ISCN.T_VIA_DER",
+                        rule_id="ISCN.T_VIA_DER_BALANCED" if is_balanced else "ISCN.T_VIA_DER_UNBALANCED",
                         score=1 if is_balanced else 2,
                         explanation="Translocation équilibrée (comptée via dérivé)" if is_balanced else "Translocation déséquilibrée (comptée via dérivé)",
                     )
@@ -1642,12 +1914,7 @@ def calcul_score_iscn(
                 extra_der_gain = True
 
         if decision is None and norm.startswith(("+", "-")):
-            decision = apply_rule(
-                is_single_chr_deseq(norm, cnt_norm),
-                "ISCN.SINGLE_CHR_DESEQ",
-                2,
-                "Déséquilibre unichromosomique",
-            )
+            decision = single_chr_deseq_rule_decision(norm, cnt_norm)
             if decision is None:
                 decision = apply_rule(
                     is_complex_multichr_deseq(base_core),
@@ -1664,18 +1931,13 @@ def calcul_score_iscn(
                 )
             if decision is None:
                 decision = RuleDecision(
-                    rule_id="ISCN.GAIN_LOSS_SIMPLE",
+                    rule_id="ISCN.GAIN_SIMPLE" if norm.startswith("+") else "ISCN.LOSS_SIMPLE",
                     score=1,
                     explanation="-",
                 )
 
         if decision is None:
-            decision = apply_rule(
-                is_single_chr_deseq(norm, cnt_norm),
-                "ISCN.SINGLE_CHR_DESEQ",
-                2,
-                "Déséquilibre unichromosomique",
-            )
+            decision = single_chr_deseq_rule_decision(norm, cnt_norm)
             if decision is None:
                 decision = apply_rule(
                     is_complex_multichr_deseq(base_core),
@@ -1700,10 +1962,10 @@ def calcul_score_iscn(
         score = decision.score
         explication = decision.explanation
         score_multiplier = eff_cnt
-        if decision.rule_id == "ISCN.ABSENT_IN_REPEAT" and decision.score == 1:
+        if decision.rule_id.startswith("ISCN.ABSENT_IN_REPEAT") and decision.score == 1:
             score_multiplier = 1
         if (
-            decision.rule_id == "ISCN.SINGLE_CHR_DESEQ"
+            decision.rule_id == "ISCN.SINGLE_CHR_GAIN_REPEAT"
             and norm.startswith("+")
             and cnt_norm > 1
         ):
@@ -1711,7 +1973,7 @@ def calcul_score_iscn(
             explication = f"{explication} (gain répété : {anom})"
         score = decision.score * score_multiplier
         if (
-            decision.rule_id == "ISCN.ABSENT_IN_REPEAT"
+            decision.rule_id.startswith("ISCN.ABSENT_IN_REPEAT")
             and "Perte chromosomique implicite" in explication
         ):
             score = 1

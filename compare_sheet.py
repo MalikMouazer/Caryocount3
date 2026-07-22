@@ -24,9 +24,9 @@ DEFAULT_LOCAL_FILE = "comptage_local_MYC.xlsx"
 # - changer ELISE_FILE_DATE quand Elise envoie un nouveau comptage manuel;
 # - changer FROZEN_RULES_REF quand on décide de figer une nouvelle version
 #   des règles. Utiliser un hash de commit Git, un tag, ou "HEAD".
-ELISE_FILE_DATE = "13 mai"
-FROZEN_RULES_LABEL = "règles avant le 27 mai à 10h-11h"
-FROZEN_RULES_REF = "aa78455" # commit ? ou tag ? ou "HEAD" pour la version actuelle (mais moins stable comme référence)
+ELISE_FILE_DATE = "10 juillet"
+FROZEN_RULES_LABEL = "règles du 10/07/2026"
+FROZEN_RULES_REF = "5a0ec02"  # dernier commit de référence
 
 LOCAL_REFERENCE_LABEL = f"fichier Elise du {ELISE_FILE_DATE} + {FROZEN_RULES_LABEL}"
 
@@ -46,7 +46,8 @@ def load_google_sheet(url_or_id: str) -> Tuple[Optional[pd.DataFrame], Optional[
     gid = gid_match.group(1) if gid_match else "0"
 
     csv_url = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq"
+        f"?tqx=out:csv&gid={gid}"
     )
 
     try:

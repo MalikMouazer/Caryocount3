@@ -18,6 +18,7 @@ openpyxl/
 
 # Donnees locales confidentielles
 comptage_local_MYC.xlsx
+comptage_local_MYC_v0.xlsx
 
 # IDE / OS
 .vscode/

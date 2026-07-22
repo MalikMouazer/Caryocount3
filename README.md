@@ -16,6 +16,8 @@ Les règles métier sont centralisées dans `My_expert_karyo_functions.py`.
 - `RULE_CATALOG` décrit les règles visibles dans l'application : identifiant, référentiel, score par défaut, libellé et explication.
 - `RULE_CATALOG` reste la source canonique des IDs, du nombre de règles, des référentiels et des scores.
 - `RULE_TECHNICAL_CHECKS` décrit ce que le code vérifie concrètement pour chaque règle : expression régulière, préfixe, fonction métier ou relation entre clones.
+- `rules_catalog_reference.csv` est la photographie interne suivie par Git. Sa colonne `N°` matérialise l'ordre de priorité propre à chaque référentiel. Le fichier doit être régénéré dans le même commit que tout ajout, modification ou suppression de règle.
+- Les lignes du CSV et leurs numéros dans l'interface suivent `RULE_PRIORITY`, donc le numéro affiché correspond exactement à l'ordre réel d'évaluation montré dans le parcours des règles.
 - Une feuille Google Sheets publique peut surcharger uniquement les colonnes `Libellé` et `Explication`.
 - `RuleDecision` est la décision effectivement appliquée pendant le calcul.
 - `analyser_formule(..., debug=True)` ajoute les colonnes `RuleID_ISCN`, `RuleID_Jon` et les explications techniques associées.
@@ -63,6 +65,20 @@ Si une nouvelle règle est ajoutée :
 3. Ajouter le critère dans `RULE_TECHNICAL_CHECKS`.
 4. Ajouter l'ID dans `RULE_PRIORITY` à l'endroit où la règle est réellement testée.
 5. Ajouter ou mettre à jour des exemples de référence couvrant cette règle.
+
+Après toute création, modification ou suppression de règle, régénérer le CSV interne :
+
+```bash
+python scripts/sync_rule_catalog_reference.py
+```
+
+L'application compare automatiquement ce CSV avec le Google Sheet dans le tableau
+principal, numéroté séparément (`1_ISCN`, `1_JON`, etc.) pour chaque référentiel.
+L'en-tête et la colonne `Rule ID` restent figés pendant le défilement. Une règle
+absente du fichier distant apparaît en bleu à sa
+position canonique; une règle présente uniquement dans le distant apparaît en
+rouge. Les cellules distantes `Libellé` ou `Explication` différentes apparaissent
+en jaune et affichent directement les versions distante et interne à harmoniser.
 
 Si deux situations ont le même score mais nécessitent des explications cliniques
 différentes, elles doivent avoir deux `Rule ID` différents. Exemple :

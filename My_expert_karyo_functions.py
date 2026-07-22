@@ -810,6 +810,7 @@ RULE_CATALOG: tuple[RuleSpec, ...] = (
     RuleSpec("ISCN.T_ALREADY_IN_DER", "ISCN 2024", 0, "Translocation déjà comptée", "Translocation explicite déjà incluse dans un chromosome dérivé."),
     RuleSpec("ISCN.T_VIA_DER_BALANCED", "ISCN 2024", 1, "Translocation équilibrée via dérivé", "Translocation équilibrée comptée à partir d'un chromosome dérivé."),
     RuleSpec("ISCN.T_VIA_DER_UNBALANCED", "ISCN 2024", 2, "Translocation déséquilibrée via dérivé", "Translocation déséquilibrée comptée à partir d'un chromosome dérivé."),
+    RuleSpec("ISCN.JUMPING_TRANSLOCATION_SECONDARY", "ISCN 2024", 1, "Occurrence secondaire d'une translocation sauteuse", "Dérivé secondaire partageant le même chromosome donneur et le même point de cassure dans un autre sous-clone."),
     RuleSpec("ISCN.DER_T_COUNTED", "ISCN 2024", 0, "Dérivé associé déjà compté", "Dérivé associé à une translocation déjà comptabilisée."),
     RuleSpec("ISCN.DER_BALANCED_T", "ISCN 2024", 0, "Dérivé de translocation équilibrée", "Dérivé issu d'une translocation équilibrée déjà représentée."),
     RuleSpec("ISCN.INTERTWINED_DER_BALANCED_SIMPLE", "ISCN 2024", 1, "Dérivés enchevêtrés équilibrés", "Groupe de dérivés reliés avec cassures concordantes."),
@@ -867,6 +868,7 @@ RULE_PRIORITY: dict[str, tuple[str, ...]] = {
         "ISCN.SEMANTIC_PLUS_DEL",
         "ISCN.MAR",
         "ISCN.DICENTRIC",
+        "ISCN.JUMPING_TRANSLOCATION_SECONDARY",
         "ISCN.T_VIA_DER_BALANCED",
         "ISCN.T_VIA_DER_UNBALANCED",
         "ISCN.DER_T_COUNTED",
@@ -914,6 +916,7 @@ RULE_TECHNICAL_CHECKS: dict[str, str] = {
     "ISCN.T_ALREADY_IN_DER": "Quand une translocation t(...) est écrite explicitement, le code vérifie si un der(...) du même clone contient déjà une t(...) avec exactement les mêmes chromosomes. Exemple: t(9;22) et der(22)t(9;22) dans le même clone. Si oui, la translocation explicite vaut 0 car elle est déjà représentée par le dérivé.",
     "ISCN.T_VIA_DER_BALANCED": "Si l'anomalie est un der(...) contenant une t(...), le code extrait les chromosomes de cette t(...), vérifie qu'au moins deux chromosomes connus sont présents, sans '?', et que la translocation n'a pas déjà été comptée. Si la même clé de translocation est reconnue comme équilibrée dans le clone, le dérivé sert à compter une translocation équilibrée. Score 1.",
     "ISCN.T_VIA_DER_UNBALANCED": "Même détection que T_VIA_DER_BALANCED, mais la clé de translocation portée par le dérivé n'est pas reconnue comme équilibrée dans le clone. Le dérivé sert donc à compter une translocation déséquilibrée. Score 2.",
+    "ISCN.JUMPING_TRANSLOCATION_SECONDARY": "Le code compare les der(...)t(...) présents dans des sous-clones différents. Il associe chaque chromosome de t(...) à son point de cassure. Lorsque plusieurs translocations déséquilibrées partagent le même chromosome et exactement le même point de cassure, mais utilisent des chromosomes partenaires différents, la première conserve son score normal et chaque occurrence secondaire vaut 1 point. Les points de cassure incertains contenant '?' sont exclus.",
     "ISCN.DER_T_COUNTED": "Pour un der(...) contenant une t(...), le code regarde si la même translocation a déjà été comptée dans le clone. Il compare une clé composée des chromosomes de t(...), par exemple {9,22}. Si cette clé est déjà présente dans les translocations explicites ou déjà comptées, le dérivé vaut 0 pour éviter de compter deux fois le même événement.",
     "ISCN.DER_BALANCED_T": "Le code identifie un der(...) qui fait partie d'une translocation équilibrée déjà reconstruite par paire de dérivés. Il vérifie aussi que le dérivé ne contient pas de composant additionnel comme add(...), del(...), dup(...), ins(...), inv(...) ou r(...). Si c'est juste la représentation du dérivé équilibré déjà pris en compte, score 0.",
     "ISCN.INTERTWINED_DER_BALANCED_SIMPLE": "Dans un même clone, le code regroupe au moins trois der(...)/dic(...) qui partagent des chromosomes. Il exige au moins trois chromosomes impliqués, trois ancrages cohérents, et des signatures 'chromosome + point de cassure' retrouvées au moins deux fois et couvrant le groupe. Sans insertion détectée, le groupe équilibré vaut 1.",
@@ -958,7 +961,7 @@ def _google_sheet_csv_url(url_or_id: str) -> str:
     if not source:
         return ""
     if "docs.google.com" not in source:
-        return f"https://docs.google.com/spreadsheets/d/{source}/export?format=csv&gid=0"
+        return f"https://docs.google.com/spreadsheets/d/{source}/gviz/tq?tqx=out:csv&gid=0"
 
     parsed = urlparse(source)
     match = re.search(r"/d/([A-Za-z0-9_-]+)", parsed.path)
@@ -969,7 +972,10 @@ def _google_sheet_csv_url(url_or_id: str) -> str:
     gid = query.get("gid", ["0"])[0]
     if not gid and parsed.fragment:
         gid = parse_qs(parsed.fragment).get("gid", ["0"])[0]
-    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid or '0'}"
+    return (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq"
+        f"?tqx=out:csv&gid={gid or '0'}"
+    )
 
 
 def _normalize_rule_catalog_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -1082,6 +1088,38 @@ def validate_rule_catalog_integrity() -> None:
         )
 
 
+def _rule_catalog_dataframe(overrides: dict[str, dict[str, str]]) -> pd.DataFrame:
+    ordered_rules = [
+        RULE_BY_ID[rule_id]
+        for system in ("ISCN 2024", "Jondreville 2020")
+        for rule_id in RULE_PRIORITY.get(system, ())
+    ]
+    counters = {"ISCN 2024": 0, "Jondreville 2020": 0}
+    rows = []
+    for rule in ordered_rules:
+        displayed = _rule_with_public_text(rule, overrides)
+        counters[displayed.system] += 1
+        suffix = "JON" if displayed.system == "Jondreville 2020" else "ISCN"
+        rows.append(
+            {
+                "Rule ID": displayed.rule_id,
+                "N°": f"{counters[displayed.system]}_{suffix}",
+                "Référentiel": displayed.system,
+                "Score par défaut": displayed.default_score,
+                "Critère technique": RULE_TECHNICAL_CHECKS.get(displayed.rule_id, ""),
+                "Libellé": displayed.title,
+                "Explication": displayed.explanation,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def get_canonical_rule_catalog_dataframe() -> pd.DataFrame:
+    """Retourne le catalogue interne sans surcharge du Google Sheet."""
+
+    return _rule_catalog_dataframe({})
+
+
 def get_rule_catalog_dataframe(public_text_url: str | None = None) -> pd.DataFrame:
     """Retourne le référentiel des règles affichable/exportable."""
 
@@ -1090,21 +1128,7 @@ def get_rule_catalog_dataframe(public_text_url: str | None = None) -> pd.DataFra
         if public_text_url
         else _public_rule_text_overrides()
     )
-    return pd.DataFrame(
-        [
-            {
-                "Rule ID": displayed.rule_id,
-                "Référentiel": displayed.system,
-                "Score par défaut": displayed.default_score,
-                "Critère technique": RULE_TECHNICAL_CHECKS.get(displayed.rule_id, ""),
-                "Libellé": displayed.title,
-                "Explication": displayed.explanation,
-            }
-            for displayed in (
-                _rule_with_public_text(rule, overrides) for rule in RULE_CATALOG
-            )
-        ]
-    )
+    return _rule_catalog_dataframe(overrides)
 
 
 def get_rule_path(rule_id: str, public_text_url: str | None = None) -> list[dict[str, object]]:
@@ -1430,6 +1454,50 @@ def calcul_score_iscn(
         t_str = bucket["t_str"]
         for anom in anoms:
             der_t_by_anom[anom] = t_str
+
+    # Translocations sauteuses : un même segment donneur (chromosome + cassure)
+    # est transloqué vers des chromosomes receveurs différents dans plusieurs
+    # sous-clones. La première occurrence garde son score normal ; les suivantes
+    # sont ramenées à un point.
+    jumping_candidates: dict[
+        tuple[str, str], list[tuple[int, str, str, str]]
+    ] = {}
+    anomaly_order = {anom: index for index, anom in enumerate(counts)}
+    for anom in counts:
+        base_core = strip_multiplicity(strip_sign(normalize_anomaly(anom)))
+        if not base_core.startswith("der"):
+            continue
+        anchor_match = re.match(r"^der\(([^)]+)\)", base_core, re.IGNORECASE)
+        anchor = anchor_match.group(1).lstrip("?").upper() if anchor_match else ""
+        for match in re.finditer(
+            r"t\(([^)]*)\)\(([^)]*)\)", base_core, re.IGNORECASE
+        ):
+            chroms = [part.lstrip("?").upper() for part in match.group(1).split(";")]
+            breakpoints = [part.lower() for part in match.group(2).split(";")]
+            if len(chroms) != 2 or len(breakpoints) != 2:
+                continue
+            if any(not value or "?" in value for value in chroms + breakpoints):
+                continue
+            clones = clone_map.get(anom, [])
+            for donor_index, (donor, breakpoint) in enumerate(zip(chroms, breakpoints)):
+                partner = chroms[1 - donor_index]
+                # Dans un der receveur, le segment sauteur provient de l'autre
+                # chromosome de la translocation.
+                if anchor and donor == anchor:
+                    continue
+                for clone in clones:
+                    jumping_candidates.setdefault((donor, breakpoint), []).append(
+                        (anomaly_order[anom], anom, clone, partner)
+                    )
+
+    jumping_secondary_anomalies: set[str] = set()
+    for candidates in jumping_candidates.values():
+        distinct_clones = {clone for _, _, clone, _ in candidates}
+        distinct_partners = {partner for _, _, _, partner in candidates}
+        if len(distinct_clones) < 2 or len(distinct_partners) < 2:
+            continue
+        ordered = sorted(candidates)
+        jumping_secondary_anomalies.update(anom for _, anom, _, _ in ordered[1:])
 
     # équilibrée si au moins un der est présent + un autre der/ider avec un ancrage différent (même clone)
     for clone, tmap in list(t_pairs_by_clone.items()):
@@ -1808,6 +1876,16 @@ def calcul_score_iscn(
                 "ISCN.DICENTRIC",
                 2,
                 "Chromosome dicentrique",
+            )
+
+        if decision is None and anom in jumping_secondary_anomalies:
+            decision = RuleDecision(
+                rule_id="ISCN.JUMPING_TRANSLOCATION_SECONDARY",
+                score=1,
+                explanation=(
+                    "Occurrence secondaire d'une translocation sauteuse "
+                    "(chromosome donneur et point de cassure communs)"
+                ),
             )
 
         if decision is None and base_core.startswith('der'):

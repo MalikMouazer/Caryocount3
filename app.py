@@ -9,7 +9,12 @@ import uuid
 import openpyxl
 import streamlit.components.v1 as components
 from pathlib import Path
-from My_expert_karyo_functions import analyser_formule, get_rule_catalog_dataframe, get_rule_path
+from My_expert_karyo_functions import (
+    analyser_formule,
+    get_canonical_rule_catalog_dataframe,
+    get_rule_catalog_dataframe,
+    get_rule_path,
+)
 
 LOCAL_TEST_FILENAME = "comptage_local_MYC.xlsx"
 LOCAL_TEST_PATH = Path(__file__).resolve().parent / LOCAL_TEST_FILENAME
@@ -18,6 +23,7 @@ TEST_SHEET_URL = (
     "1_QPAzEr3PNHaNVu8Qxuv_hWCUoBQqqRcNSnX-Q0Egm8/edit?gid=98233212#gid=98233212"
 )
 RULE_CATALOG_SHEET_URL = "http://docs.google.com/spreadsheets/d/1MkwGWtuRU53fuaZ61RejAapUZ1NIeZcIJwMuv7OaY4w/edit?gid=292168720#gid=292168720"
+RULE_CATALOG_REFERENCE_PATH = Path(__file__).resolve().parent / "rules_catalog_reference.csv"
 
 # Configuration de la page
 st.set_page_config(
@@ -53,7 +59,8 @@ def load_google_sheet(url_or_id):
     gid = gid_match.group(1) if gid_match else "0"
 
     csv_url = (
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq"
+        f"?tqx=out:csv&gid={gid}"
     )
 
     try:
@@ -111,43 +118,54 @@ def format_percent(value: float) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
+def summarize_matches(match_details):
+    """Calcule les mêmes compteurs de concordance pour l'aperçu et le bilan."""
+
+    summary = {}
+    for system in ("iscn", "jon"):
+        total = sum(1 for match in match_details if match.get(system) is not None)
+        ok = sum(1 for match in match_details if match.get(system) is True)
+        summary[system] = {
+            "ok": ok,
+            "total": total,
+            "percent": floor_percent(ok, total),
+        }
+    return summary
+
+
 def compute_match_preview(df):
     formule_col, count_i_col, count_j_col = detect_input_columns(df)
     if formule_col is None:
         return None
 
-    total_i = 0
-    ok_i = 0
-    total_j = 0
-    ok_j = 0
     errors = 0
+    match_details = []
 
     for _, row in df.iterrows():
         _, totals, error = analyser_formule(row[formule_col])
+        match_detail = {"iscn": None, "jon": None}
         if error:
             errors += 1
+            match_details.append(match_detail)
             continue
 
         if count_i_col:
             ref_i = normalize_reference_value(row[count_i_col])
             if ref_i is not None:
-                total_i += 1
-                ok_i += int(totals.get("iscn") == ref_i)
+                match_detail["iscn"] = totals.get("iscn") == ref_i
         if count_j_col:
             ref_j = normalize_reference_value(row[count_j_col])
             if ref_j is not None:
-                total_j += 1
-                ok_j += int(totals.get("jondroville") == ref_j)
+                match_detail["jon"] = totals.get("jondroville") == ref_j
+        match_details.append(match_detail)
 
-    return {
-        "errors": errors,
-        "iscn": floor_percent(ok_i, total_i),
-        "jon": floor_percent(ok_j, total_j),
-    }
+    summary = summarize_matches(match_details)
+    summary["errors"] = errors
+    return summary
 
 
 @st.cache_data(show_spinner=False, ttl=300)
-def load_google_sheet_preview(url):
+def load_google_sheet_preview_v2(url):
     df, err = load_google_sheet(url)
     if err:
         return None, err
@@ -155,7 +173,7 @@ def load_google_sheet_preview(url):
 
 
 @st.cache_data(show_spinner=False)
-def load_local_sheet_preview(path, mtime):
+def load_local_sheet_preview_v2(path, mtime):
     df = pd.read_excel(path)
     return compute_match_preview(df)
 
@@ -167,18 +185,212 @@ def preview_button_label(title, preview=None, missing_text=None):
         return f"{title}\n:orange[Préanalyse indisponible]"
 
     parts = []
-    if preview.get("iscn") is not None:
-        color = "green" if preview["iscn"] == 100 else "red"
-        parts.append(f":{color}[ISCN {format_percent(preview['iscn'])}%]")
-    if preview.get("jon") is not None:
-        color = "green" if preview["jon"] == 100 else "red"
-        parts.append(f":{color}[Jon {format_percent(preview['jon'])}%]")
+    for system, label in (("iscn", "ISCN"), ("jon", "Jon")):
+        stats = preview.get(system, {})
+        if stats.get("percent") is not None:
+            color = "green" if stats["percent"] == 100 else "red"
+            parts.append(
+                f":{color}[{label} {stats['ok']}/{stats['total']} "
+                f"({format_percent(stats['percent'])}%)]"
+            )
     if preview.get("errors"):
         parts.append(f":red[{preview['errors']} erreur(s)]")
     if not parts:
         parts.append(":orange[Sans références]")
 
     return f"{title}\n{' · '.join(parts)}"
+
+
+def normalize_rule_catalog_frame(df):
+    aliases = {
+        "rule id": "Rule ID",
+        "rule_id": "Rule ID",
+        "id": "Rule ID",
+        "libelle": "Libellé",
+        "libellé": "Libellé",
+        "label": "Libellé",
+        "title": "Libellé",
+        "explication": "Explication",
+        "explanation": "Explication",
+    }
+    return df.rename(
+        columns={
+            column: aliases.get(str(column).strip().lower(), str(column).strip())
+            for column in df.columns
+        }
+    )
+
+
+def normalized_catalog_text(value):
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    return str(value).strip()
+
+
+def compare_rule_catalogs(reference_df, distant_df):
+    """Compare les lignes et les textes éditables des deux référentiels."""
+
+    reference_df = normalize_rule_catalog_frame(reference_df)
+    distant_df = normalize_rule_catalog_frame(distant_df)
+    if "Rule ID" not in distant_df.columns:
+        raise ValueError("Le fichier distant ne contient pas la colonne 'Rule ID'.")
+
+    reference_rows = {
+        normalized_catalog_text(row["Rule ID"]): row
+        for _, row in reference_df.iterrows()
+        if normalized_catalog_text(row.get("Rule ID"))
+    }
+    distant_rows = {
+        normalized_catalog_text(row["Rule ID"]): row
+        for _, row in distant_df.iterrows()
+        if normalized_catalog_text(row.get("Rule ID"))
+    }
+
+    reference_ids = set(reference_rows)
+    distant_ids = set(distant_rows)
+    missing = sorted(reference_ids - distant_ids)
+    extra = sorted(distant_ids - reference_ids)
+    differences = []
+    for rule_id in sorted(reference_ids & distant_ids):
+        for column in ("Libellé", "Explication"):
+            internal_value = normalized_catalog_text(reference_rows[rule_id].get(column))
+            distant_value = normalized_catalog_text(distant_rows[rule_id].get(column))
+            if internal_value != distant_value:
+                differences.append(
+                    {
+                        "rule_id": rule_id,
+                        "column": column,
+                        "internal": internal_value,
+                        "distant": distant_value,
+                    }
+                )
+    return missing, extra, differences
+
+
+def render_rule_catalog_table(reference_df, distant_df=None):
+    """Affiche le référentiel et ses discordances dans un tableau unique."""
+
+    columns = [
+        "Rule ID",
+        "Référentiel",
+        "Score par défaut",
+        "Critère technique",
+        "Libellé",
+        "Explication",
+    ]
+    reference_df = normalize_rule_catalog_frame(reference_df)
+    has_distant_catalog = distant_df is not None
+    distant_df = (
+        normalize_rule_catalog_frame(distant_df)
+        if has_distant_catalog
+        else pd.DataFrame(columns=columns)
+    )
+    if has_distant_catalog:
+        missing, extra, differences = compare_rule_catalogs(reference_df, distant_df)
+    else:
+        missing, extra, differences = [], [], []
+    missing_set = set(missing)
+    extra_set = set(extra)
+    difference_keys = {
+        (difference["rule_id"], difference["column"]): difference
+        for difference in differences
+    }
+
+    reference_rows = {
+        normalized_catalog_text(row.get("Rule ID")): row.to_dict()
+        for _, row in reference_df.iterrows()
+    }
+    distant_rows = {
+        normalized_catalog_text(row.get("Rule ID")): row.to_dict()
+        for _, row in distant_df.iterrows()
+        if normalized_catalog_text(row.get("Rule ID"))
+    }
+    reference_order = list(reference_rows)
+    system_counters = {"ISCN": 0, "JON": 0}
+    order_numbers = {}
+    for rule_id in reference_order:
+        system = normalized_catalog_text(reference_rows[rule_id].get("Référentiel"))
+        suffix = "JON" if system == "Jondreville 2020" else "ISCN"
+        system_counters[suffix] += 1
+        order_numbers[rule_id] = (
+            normalized_catalog_text(reference_rows[rule_id].get("N°"))
+            or f"{system_counters[suffix]}_{suffix}"
+        )
+
+    # Les règles distantes inconnues sont insérées à leur position relative dans
+    # le Google Sheet, avant la prochaine règle canonique connue.
+    merged_ids = reference_order.copy()
+    previous_known = None
+    for rule_id in distant_rows:
+        if rule_id in reference_rows:
+            previous_known = rule_id
+            continue
+        if rule_id not in extra_set:
+            continue
+        insert_at = merged_ids.index(previous_known) + 1 if previous_known in merged_ids else 0
+        while insert_at < len(merged_ids) and merged_ids[insert_at] in extra_set:
+            insert_at += 1
+        merged_ids.insert(insert_at, rule_id)
+        previous_known = rule_id
+
+    body_rows = []
+    for rule_id in merged_ids:
+        is_missing = rule_id in missing_set
+        is_extra = rule_id in extra_set
+        row_class = "catalog-row-missing" if is_missing else "catalog-row-extra" if is_extra else ""
+        source = distant_rows.get(rule_id) if is_extra else reference_rows.get(rule_id, {})
+        displayed = dict(source or {})
+        if not is_missing and not is_extra:
+            distant_row = distant_rows.get(rule_id, {})
+            for column in ("Libellé", "Explication"):
+                if column in distant_row:
+                    displayed[column] = normalized_catalog_text(distant_row.get(column))
+
+        displayed_system = normalized_catalog_text(displayed.get("Référentiel"))
+        order_suffix = "JON" if displayed_system == "Jondreville 2020" else "ISCN"
+        order_label = order_numbers.get(rule_id, f"—_{order_suffix}")
+        cells = [
+            f"<td class='catalog-rule-id'>{html.escape(rule_id)}</td>",
+            f"<td class='catalog-order'>{order_label}</td>",
+        ]
+        for column in columns[1:]:
+            value = normalized_catalog_text(displayed.get(column)) or "—"
+            difference = difference_keys.get((rule_id, column))
+            if difference:
+                cells.append(
+                    "<td class='catalog-diff-cell'>"
+                    "<div class='catalog-version catalog-version-distant'>"
+                    f"<strong>Distant :</strong> {html.escape(value)}</div>"
+                    "<div class='catalog-version catalog-version-internal'>"
+                    f"<strong>Interne :</strong> {html.escape(difference['internal']) or '—'}</div>"
+                    "<div class='catalog-harmonize'>Harmoniser les deux fichiers.</div>"
+                    "</td>"
+                )
+            else:
+                cells.append(f"<td>{html.escape(value)}</td>")
+
+        if is_missing:
+            status = "Absente du Google Sheet : règle à ajouter dans le fichier distant."
+            cells[-1] = cells[-1][:-5] + (
+                "<div class='catalog-row-note'>" + html.escape(status) + "</div></td>"
+            )
+        elif is_extra:
+            status = "Absente du CSV interne : règle à supprimer du fichier distant."
+            cells[-1] = cells[-1][:-5] + (
+                "<div class='catalog-row-note'>" + html.escape(status) + "</div></td>"
+            )
+        body_rows.append(f"<tr class='{row_class}'>{''.join(cells)}</tr>")
+
+    headers = "".join(
+        f"<th>{html.escape(column)}</th>"
+        for column in ["Rule ID", "N°"] + columns[1:]
+    )
+    st.markdown(
+        "<div class='catalog-table-scroll'><table class='catalog-main-table'>"
+        f"<thead><tr>{headers}</tr></thead><tbody>{''.join(body_rows)}</tbody>"
+        "</table></div>",
+        unsafe_allow_html=True,
+    )
 
 
 # Titre de l'application
@@ -496,11 +708,44 @@ with st.expander("Référentiel des règles de scoring"):
             'rel="noopener noreferrer">Ouvrir le Google Sheet du catalogue</a>',
             unsafe_allow_html=True,
         )
-    st.dataframe(
-        get_rule_catalog_dataframe(public_text_url=RULE_CATALOG_SHEET_URL or None),
-        width="stretch",
-        hide_index=True,
-    )
+    try:
+        internal_catalog = pd.read_csv(RULE_CATALOG_REFERENCE_PATH)
+    except Exception as catalog_error:
+        internal_catalog = get_canonical_rule_catalog_dataframe()
+        st.error(f"CSV interne du référentiel indisponible : {catalog_error}")
+
+    # Le CSV doit évoluer dans le même commit que RULE_CATALOG.
+    code_catalog = get_canonical_rule_catalog_dataframe()
+    snapshot_columns = [
+        "Rule ID",
+        "N°",
+        "Référentiel",
+        "Score par défaut",
+        "Critère technique",
+        "Libellé",
+        "Explication",
+    ]
+    internal_snapshot = internal_catalog[snapshot_columns].fillna("").astype(str)
+    code_snapshot = code_catalog[snapshot_columns].fillna("").astype(str)
+    if internal_snapshot.to_dict("records") != code_snapshot.to_dict("records"):
+        st.error(
+            "Le code et rules_catalog_reference.csv ne sont plus synchronisés. "
+            "Exécuter : python scripts/sync_rule_catalog_reference.py"
+        )
+
+    distant_catalog, distant_catalog_error = load_google_sheet(RULE_CATALOG_SHEET_URL)
+    if distant_catalog_error:
+        st.warning(
+            "Comparaison avec le fichier distant impossible : "
+            f"{distant_catalog_error}"
+        )
+        render_rule_catalog_table(internal_catalog)
+    else:
+        try:
+            render_rule_catalog_table(internal_catalog, distant_catalog)
+        except Exception as comparison_error:
+            st.warning(f"Contrôle du référentiel distant impossible : {comparison_error}")
+            render_rule_catalog_table(internal_catalog)
 
 # Création des onglets (par défaut: analyse d'un fichier)
 tab2, tab1 = st.tabs(["Analyse d'un fichier", "Analyse d'une formule"])
@@ -558,14 +803,14 @@ with tab2:
         'rel="noopener noreferrer">Ouvrir le Google Sheet des formules de test</a>',
         unsafe_allow_html=True,
     )
-    remote_preview, remote_preview_err = load_google_sheet_preview(TEST_SHEET_URL)
+    remote_preview, remote_preview_err = load_google_sheet_preview_v2(TEST_SHEET_URL)
     remote_button_label = preview_button_label(
         "Analyser le fichier de tests",
         remote_preview,
         "Préanalyse indisponible" if remote_preview_err else None,
     )
     if LOCAL_TEST_PATH.exists():
-        local_preview = load_local_sheet_preview(
+        local_preview = load_local_sheet_preview_v2(
             str(LOCAL_TEST_PATH), LOCAL_TEST_PATH.stat().st_mtime
         )
         local_button_label = preview_button_label("Analyser le fichier local MYC", local_preview)
@@ -982,12 +1227,13 @@ with tab2:
                 # Statistiques de correspondance + export sur une seule ligne
                 columns = st.columns(3)
                 renderers = []
+                match_summary = summarize_matches(match_details)
 
                 if has_count_i:
-                    total_i = sum(1 for m in match_details if m["iscn"] is not None)
-                    match_i = sum(1 for m in match_details if m["iscn"])
+                    total_i = match_summary["iscn"]["total"]
+                    match_i = match_summary["iscn"]["ok"]
                     if total_i:
-                        percent_i = format_percent(floor_percent(match_i, total_i))
+                        percent_i = format_percent(match_summary["iscn"]["percent"])
                         msg_i = f"Correspondance ISCN: {match_i}/{total_i} ({percent_i}%)"
 
                         def render_iscn(col, message=msg_i):
@@ -996,10 +1242,10 @@ with tab2:
                         renderers.append(render_iscn)
 
                 if has_count_j:
-                    total_j = sum(1 for m in match_details if m["jon"] is not None)
-                    match_j = sum(1 for m in match_details if m["jon"])
+                    total_j = match_summary["jon"]["total"]
+                    match_j = match_summary["jon"]["ok"]
                     if total_j:
-                        percent_j = format_percent(floor_percent(match_j, total_j))
+                        percent_j = format_percent(match_summary["jon"]["percent"])
                         msg_j = f"Correspondance Jondreville: {match_j}/{total_j} ({percent_j}%)"
 
                         def render_jon(col, message=msg_j):
@@ -1437,6 +1683,103 @@ st.markdown("""
         background-color: #f8fafc;
         border: 1px solid #e2e8f0;
         font-size: 0.85rem;
+    }
+
+    .catalog-table-scroll {
+        width: 100%;
+        max-height: 70vh;
+        overflow: auto;
+        margin-top: 10px;
+        border: 1px solid #d1d5db;
+    }
+
+    .catalog-main-table {
+        width: 100%;
+        margin-bottom: 12px;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+    }
+
+    .catalog-main-table th,
+    .catalog-main-table td {
+        padding: 7px;
+        border: 1px solid #d1d5db;
+        vertical-align: top;
+        text-align: left;
+    }
+
+    .catalog-main-table th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: #f1f5f9;
+        color: #0f172a;
+    }
+
+    .catalog-main-table th:first-child {
+        left: 0;
+        z-index: 4;
+    }
+
+    .catalog-rule-id {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        min-width: 245px;
+        background: #ffffff;
+        font-weight: 700;
+    }
+
+    .catalog-order {
+        min-width: 38px;
+        text-align: center !important;
+        font-weight: 800;
+    }
+
+    .catalog-row-missing td {
+        background-color: #dbeafe;
+        color: #1e3a8a;
+    }
+
+    .catalog-row-missing .catalog-rule-id {
+        background-color: #dbeafe;
+    }
+
+    .catalog-row-extra td {
+        background-color: #fee2e2;
+        color: #7f1d1d;
+    }
+
+    .catalog-row-extra .catalog-rule-id {
+        background-color: #fee2e2;
+    }
+
+    .catalog-diff-cell {
+        background-color: #fef3c7 !important;
+        color: #713f12 !important;
+    }
+
+    .catalog-version {
+        padding: 4px 0;
+    }
+
+    .catalog-version-internal {
+        border-top: 1px solid #f59e0b;
+    }
+
+    .catalog-harmonize {
+        margin-top: 4px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #92400e;
+    }
+
+    .catalog-row-note {
+        margin-top: 6px;
+        padding: 5px 7px;
+        border: 1px solid currentColor;
+        border-radius: 4px;
+        font-weight: 700;
     }
 
     /* Style pour les lignes du tableau */

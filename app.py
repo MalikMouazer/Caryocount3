@@ -24,13 +24,130 @@ TEST_SHEET_URL = (
 )
 RULE_CATALOG_SHEET_URL = "http://docs.google.com/spreadsheets/d/1MkwGWtuRU53fuaZ61RejAapUZ1NIeZcIJwMuv7OaY4w/edit?gid=292168720#gid=292168720"
 RULE_CATALOG_REFERENCE_PATH = Path(__file__).resolve().parent / "rules_catalog_reference.csv"
+LOGO_PATH = Path(__file__).resolve().parent / "assets" / "caryocount-logo.svg"
+GITHUB_URL = "https://github.com/MalikMouazer/Caryocount3"
+DOCUMENTATION_URL = f"{GITHUB_URL}#readme"
 
 # Configuration de la page
 st.set_page_config(
-    page_title="Analyseur de Caryotypes",
-    page_icon="🧬",
+    page_title="Caryocount",
+    page_icon=str(LOGO_PATH),
     layout="wide"
 )
+
+TRANSLATIONS = {
+    "en": {
+        "documentation": "Documentation",
+        "rules": "Scoring rule reference",
+        "open_catalog": "Open the rule catalogue Google Sheet",
+        "file_tab": "File analysis",
+        "formula_tab": "Formula analysis",
+        "enter_formula": "Enter a karyotype formula",
+        "analyse_formula": "Analyse formula",
+        "detected_scores": "Detected scores",
+        "formula": "Formula",
+        "details": "Anomaly details",
+        "missing_formula": "Please enter a karyotype formula.",
+        "upload_title": "Upload a file containing karyotype formulas",
+        "open_tests": "Open the test formulas Google Sheet",
+        "analyse_tests": "Analyse test file",
+        "analyse_local": "Analyse local MYC file",
+        "preview_unavailable": "Preview unavailable",
+        "waiting_myc": "Waiting for the MYC file",
+        "no_references": "No references",
+        "errors": "error(s)",
+        "upload_local": "Upload the local MYC file",
+        "upload_other": "Choose another CSV or Excel file",
+        "required_column": "The file must contain at least one 'Formule' column.",
+        "results": "Analysis results",
+        "sort": "Sort",
+        "sort_help": "Show mismatching rows first (ISCN or Jon), while preserving their original order.",
+        "line": "Row",
+        "count_iscn": "ISCN count",
+        "count_jon": "Jon count",
+        "detected_anomalies": "Detected anomalies",
+        "match": "Match",
+        "download": "Download results as Excel",
+        "footer": "Caryocount analyses karyotype formulas using ISCN 2024 standards.",
+        "type": "Type",
+        "clones": "Clones",
+        "explanation": "Explanation",
+        "technical_criterion": "Technical criterion",
+        "clinical_explanation": "Clinical explanation",
+        "applied_explanation": "Applied explanation",
+        "show_rule_path": "Show rule path",
+        "selected": "selected",
+        "tested_before": "tested before",
+        "score": "score",
+        "remote": "Remote",
+        "internal": "Internal",
+        "harmonise": "Harmonise both files.",
+        "remote_load_error": "Could not compare with the remote file",
+        "catalog_check_error": "Could not check the remote rule reference",
+        "test_load_error": "Could not load the test file",
+        "file_analysis_error": "Could not analyse the file",
+        "sort_not_applied": "Sort not applied",
+        "go_to_row": "Go to a row",
+    },
+    "fr": {
+        "documentation": "Documentation",
+        "rules": "Référentiel des règles de scoring",
+        "open_catalog": "Ouvrir le Google Sheet du catalogue",
+        "file_tab": "Analyse d'un fichier",
+        "formula_tab": "Analyse d'une formule",
+        "enter_formula": "Entrez une formule caryotypique",
+        "analyse_formula": "Analyser la formule",
+        "detected_scores": "Scores détectés",
+        "formula": "Formule",
+        "details": "Détail des anomalies",
+        "missing_formula": "Veuillez entrer une formule caryotypique.",
+        "upload_title": "Chargez un fichier contenant des formules caryotypiques",
+        "open_tests": "Ouvrir le Google Sheet des formules de test",
+        "analyse_tests": "Analyser le fichier de tests",
+        "analyse_local": "Analyser le fichier local MYC",
+        "preview_unavailable": "Préanalyse indisponible",
+        "waiting_myc": "En attente du fichier MYC",
+        "no_references": "Sans références",
+        "errors": "erreur(s)",
+        "upload_local": "Charger le fichier local MYC",
+        "upload_other": "Choisir un autre fichier CSV ou Excel",
+        "required_column": "Le fichier doit contenir au moins une colonne 'Formule'.",
+        "results": "Résultats de l'analyse",
+        "sort": "Trier",
+        "sort_help": "Affiche d'abord les lignes discordantes (ISCN ou Jon), dans l'ordre des lignes d'origine.",
+        "line": "Ligne",
+        "count_iscn": "Comptage ISCN",
+        "count_jon": "Comptage Jon",
+        "detected_anomalies": "Anomalies détectées",
+        "match": "Correspondance",
+        "download": "Télécharger les résultats en Excel",
+        "footer": "Caryocount analyse les formules caryotypiques selon les normes ISCN 2024.",
+        "type": "Type",
+        "clones": "Clones",
+        "explanation": "Explication",
+        "technical_criterion": "Critère technique",
+        "clinical_explanation": "Explication clinique",
+        "applied_explanation": "Explication appliquée",
+        "show_rule_path": "Afficher le parcours de règles",
+        "selected": "retenue",
+        "tested_before": "testée avant",
+        "score": "score",
+        "remote": "Distant",
+        "internal": "Interne",
+        "harmonise": "Harmoniser les deux fichiers.",
+        "remote_load_error": "Comparaison avec le fichier distant impossible",
+        "catalog_check_error": "Contrôle du référentiel distant impossible",
+        "test_load_error": "Erreur lors du chargement du fichier de tests",
+        "file_analysis_error": "Erreur lors de l'analyse du fichier",
+        "sort_not_applied": "Tri non appliqué",
+        "go_to_row": "Aller à une ligne",
+    },
+}
+
+language = st.session_state.get("language", "en")
+
+def tr(key):
+    return TRANSLATIONS[language][key]
 
 # Utilitaire pour charger une feuille Google Sheets publique
 def load_google_sheet(url_or_id):
@@ -182,7 +299,7 @@ def preview_button_label(title, preview=None, missing_text=None):
     if missing_text:
         return f"{title}\n:orange[{missing_text}]"
     if not preview:
-        return f"{title}\n:orange[Préanalyse indisponible]"
+        return f"{title}\n:orange[{tr('preview_unavailable')}]"
 
     parts = []
     for system, label in (("iscn", "ISCN"), ("jon", "Jon")):
@@ -194,9 +311,9 @@ def preview_button_label(title, preview=None, missing_text=None):
                 f"({format_percent(stats['percent'])}%)]"
             )
     if preview.get("errors"):
-        parts.append(f":red[{preview['errors']} erreur(s)]")
+        parts.append(f":red[{preview['errors']} {tr('errors')}]")
     if not parts:
-        parts.append(":orange[Sans références]")
+        parts.append(f":orange[{tr('no_references')}]")
 
     return f"{title}\n{' · '.join(parts)}"
 
@@ -360,10 +477,10 @@ def render_rule_catalog_table(reference_df, distant_df=None):
                 cells.append(
                     "<td class='catalog-diff-cell'>"
                     "<div class='catalog-version catalog-version-distant'>"
-                    f"<strong>Distant :</strong> {html.escape(value)}</div>"
+                    f"<strong>{tr('remote')}:</strong> {html.escape(value)}</div>"
                     "<div class='catalog-version catalog-version-internal'>"
-                    f"<strong>Interne :</strong> {html.escape(difference['internal']) or '—'}</div>"
-                    "<div class='catalog-harmonize'>Harmoniser les deux fichiers.</div>"
+                    f"<strong>{tr('internal')}:</strong> {html.escape(difference['internal']) or '—'}</div>"
+                    f"<div class='catalog-harmonize'>{tr('harmonise')}</div>"
                     "</td>"
                 )
             else:
@@ -381,8 +498,16 @@ def render_rule_catalog_table(reference_df, distant_df=None):
             )
         body_rows.append(f"<tr class='{row_class}'>{''.join(cells)}</tr>")
 
+    catalog_headers = {
+        "N°": "No." if language == "en" else "N°",
+        "Référentiel": "Reference" if language == "en" else "Référentiel",
+        "Score par défaut": "Default score" if language == "en" else "Score par défaut",
+        "Critère technique": "Technical criterion" if language == "en" else "Critère technique",
+        "Libellé": "Label" if language == "en" else "Libellé",
+        "Explication": "Explanation" if language == "en" else "Explication",
+    }
     headers = "".join(
-        f"<th>{html.escape(column)}</th>"
+        f"<th>{html.escape(catalog_headers.get(column, column))}</th>"
         for column in ["Rule ID", "N°"] + columns[1:]
     )
     st.markdown(
@@ -393,8 +518,141 @@ def render_rule_catalog_table(reference_df, distant_df=None):
     )
 
 
-# Titre de l'application
-st.title("Analyseur de Formules Caryotypiques (ISCN)")
+# Ces styles doivent être chargés avant l'en-tête pour éviter que les SVG
+# apparaissent brièvement à leur taille native pendant le chargement.
+st.markdown(
+    """
+    <style>
+        .caryocount-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 56px;
+            padding: 4px 0;
+            overflow: visible;
+        }
+
+        .caryocount-brand h1 {
+            margin: 0;
+            padding: 0;
+            line-height: 1.15;
+        }
+
+        .caryocount-logo {
+            display: inline-flex;
+            width: 46px;
+            height: 46px;
+            padding: 2px;
+            box-sizing: border-box;
+            flex: 0 0 46px;
+            line-height: 0;
+            overflow: visible;
+        }
+
+        .caryocount-logo svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+            overflow: visible;
+        }
+
+        .header-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: inherit !important;
+            font-weight: 600;
+            text-decoration: none !important;
+            white-space: nowrap;
+        }
+
+        .header-link svg {
+            display: block;
+            width: 19px;
+            height: 19px;
+            flex: 0 0 19px;
+            fill: currentColor;
+        }
+
+        .language-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            color: inherit;
+            line-height: 0;
+        }
+
+        .language-icon svg {
+            display: block;
+            width: 20px;
+            height: 20px;
+            flex: 0 0 20px;
+            fill: currentColor;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# En-tête compact
+brand_col, docs_col, github_col, language_col = st.columns([7, 1.5, 1, 1.2], vertical_alignment="center")
+brand_logo_svg = LOGO_PATH.read_text(encoding="utf-8")
+brand_col.markdown(
+    f"""
+    <div class="caryocount-brand">
+        <span class="caryocount-logo">{brand_logo_svg}</span>
+        <h1>Caryocount</h1>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+docs_col.markdown(
+    f"""
+    <a class="header-link" href="{DOCUMENTATION_URL}" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 2h8l4 4v16H6V2zm8 1.5V7h3.5L14 3.5zM8 11h8V9H8v2zm0 4h8v-2H8v2zm0 4h6v-2H8v2z"/>
+        </svg>
+        <span>{tr('documentation')}</span>
+    </a>
+    """,
+    unsafe_allow_html=True,
+)
+github_col.markdown(
+    f"""
+    <a class="header-link" href="{GITHUB_URL}" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.7-1.28-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.19-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.18c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7z"/>
+        </svg>
+        <span>GitHub</span>
+    </a>
+    """,
+    unsafe_allow_html=True,
+)
+language_icon_col, language_select_col = language_col.columns([0.28, 1], vertical_alignment="center")
+language_icon_col.markdown(
+    """
+    <span class="language-icon" title="Language / Langue">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.92 6h-3.07a15.7 15.7 0 0 0-1.38-3.56A8.04 8.04 0 0 1 18.92 8zM12 4c.83 1.2 1.46 2.53 1.83 4h-3.66A13.6 13.6 0 0 1 12 4zM4.26 14a7.8 7.8 0 0 1 0-4h3.39a16.8 16.8 0 0 0 0 4H4.26zm.82 2h3.07c.3 1.27.77 2.47 1.38 3.56A8.04 8.04 0 0 1 5.08 16zM8.15 8H5.08a8.04 8.04 0 0 1 4.45-3.56A15.7 15.7 0 0 0 8.15 8zM12 20a13.6 13.6 0 0 1-1.83-4h3.66A13.6 13.6 0 0 1 12 20zm2.23-6H9.77a14.7 14.7 0 0 1 0-4h4.46a14.7 14.7 0 0 1 0 4zm.24 5.56A15.7 15.7 0 0 0 15.85 16h3.07a8.04 8.04 0 0 1-4.45 3.56zM16.35 14a16.8 16.8 0 0 0 0-4h3.39a7.8 7.8 0 0 1 0 4h-3.39z"/>
+        </svg>
+    </span>
+    """,
+    unsafe_allow_html=True,
+)
+selected_language = language_select_col.selectbox(
+    "Language / Langue",
+    options=["en", "fr"],
+    index=0 if language == "en" else 1,
+    format_func=lambda value: "EN" if value == "en" else "FR",
+    label_visibility="collapsed",
+    key="language_selector",
+)
+if selected_language != language:
+    st.session_state["language"] = selected_language
+    st.rerun()
 
 # Fonction pour créer un lien de téléchargement Excel
 def get_excel_download_link(df, filename="resultats_analyse.xlsx"):
@@ -406,7 +664,7 @@ def get_excel_download_link(df, filename="resultats_analyse.xlsx"):
         df.to_excel(writer, index=False, sheet_name='Résultats')
     excel_data = output.getvalue()
     b64 = base64.b64encode(excel_data).decode()
-    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" class="download-button">Télécharger les résultats en Excel</a>'
+    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}" class="download-button">{tr("download")}</a>'
     return href
 
 # Fonction pour formater les explications avec des puces colorées
@@ -449,9 +707,9 @@ def format_anomalies_html(anomalies_df):
                       display: inline-block; font-weight: bold;">{score} pts</span>
             </div>
             <div style="margin-left: 10px; color: #666;">
-                <div><strong>Type:</strong> {type_anom}</div>
-                <div><strong>Clones:</strong> {clones}</div>
-                <div><strong>Explication:</strong> {explication}</div>
+                <div><strong>{tr("type")}:</strong> {type_anom}</div>
+                <div><strong>{tr("clones")}:</strong> {clones}</div>
+                <div><strong>{tr("explanation")}:</strong> {explication}</div>
             </div>
         </div>
         """
@@ -507,19 +765,19 @@ def format_anomalies_compact(anomalies_df):
         for step in path:
             selected = bool(step["selected"])
             step_class = " selected" if selected else ""
-            marker = "retenue" if selected else "testée avant"
+            marker = tr("selected") if selected else tr("tested_before")
             score_text = step.get("default_score")
             score_html = f" · score {html.escape(str(score_text))}" if score_text != "" else ""
             open_attr = " open" if selected else ""
             technical_check = str(step.get("technical_check") or "").strip()
             technical_html = (
-                f'<div class="rule-detail-block"><strong>Critère technique :</strong> {html.escape(technical_check)}</div>'
+                f'<div class="rule-detail-block"><strong>{tr("technical_criterion")}:</strong> {html.escape(technical_check)}</div>'
                 if technical_check
                 else ""
             )
             explanation = str(step.get("explanation") or "").strip()
             explanation_html = (
-                f'<div class="rule-detail-block"><strong>Explication clinique :</strong> {html.escape(explanation)}</div>'
+                f'<div class="rule-detail-block"><strong>{tr("clinical_explanation")}:</strong> {html.escape(explanation)}</div>'
                 if explanation
                 else ""
             )
@@ -544,13 +802,13 @@ def format_anomalies_compact(anomalies_df):
         if applied_text:
             applied_html = (
                 '<div class="rule-applied">'
-                f'<strong>Explication appliquée :</strong> {html.escape(applied_text)}'
+                f'<strong>{tr("applied_explanation")}:</strong> {html.escape(applied_text)}'
                 '</div>'
             )
 
         return (
             f'<button type="button" class="rule-help" popovertarget="{popover_id}" '
-            'aria-label="Afficher le parcours de règles">?</button>'
+            f'aria-label="{tr("show_rule_path")}">?</button>'
             f'<div id="{popover_id}" class="rule-popover" popover>'
             f'{applied_html}'
             '<ol>'
@@ -694,18 +952,11 @@ def render_score_totals(score_iscn, score_jon):
     """
 
 # Interface utilisateur
-st.markdown("""
-Cette application permet d'analyser des formules caryotypiques (notation ISCN) pour :
-- Compter le nombre d'anomalies
-- Identifier le type de chaque anomalie
-- Comparer le comptage automatique avec un comptage manuel (si disponible)
-""")
-
-with st.expander("Référentiel des règles de scoring"):
+with st.expander(tr("rules")):
     if RULE_CATALOG_SHEET_URL:
         st.markdown(
             f'<a href="{html.escape(RULE_CATALOG_SHEET_URL)}" target="_blank" '
-            'rel="noopener noreferrer">Ouvrir le Google Sheet du catalogue</a>',
+            f'rel="noopener noreferrer">{tr("open_catalog")}</a>',
             unsafe_allow_html=True,
         )
     try:
@@ -735,34 +986,31 @@ with st.expander("Référentiel des règles de scoring"):
 
     distant_catalog, distant_catalog_error = load_google_sheet(RULE_CATALOG_SHEET_URL)
     if distant_catalog_error:
-        st.warning(
-            "Comparaison avec le fichier distant impossible : "
-            f"{distant_catalog_error}"
-        )
+        st.warning(f"{tr('remote_load_error')}: {distant_catalog_error}")
         render_rule_catalog_table(internal_catalog)
     else:
         try:
             render_rule_catalog_table(internal_catalog, distant_catalog)
         except Exception as comparison_error:
-            st.warning(f"Contrôle du référentiel distant impossible : {comparison_error}")
+            st.warning(f"{tr('catalog_check_error')}: {comparison_error}")
             render_rule_catalog_table(internal_catalog)
 
 # Création des onglets (par défaut: analyse d'un fichier)
-tab2, tab1 = st.tabs(["Analyse d'un fichier", "Analyse d'une formule"])
+tab2, tab1 = st.tabs([tr("file_tab"), tr("formula_tab")])
 
 # Onglet 1: Analyse d'une formule
 with tab1:
-    st.subheader("Entrez une formule caryotypique")
+    st.subheader(tr("enter_formula"))
     formule = st.text_input("Formule ISCN", placeholder="Ex: 47,XX,+8[20]")
     
-    if st.button("Analyser la formule", key="analyser_formule"):
+    if st.button(tr("analyse_formula"), key="analyser_formule"):
         if formule:
             df, totals, error = analyser_formule(formule, debug=True)
             if error:
                 st.error(error)
             else:
                 st.success(
-                    f"Scores détectés — ISCN: {totals['iscn']} | Jondreville: {totals['jondroville']}"
+                    f"{tr('detected_scores')} — ISCN: {totals['iscn']} | Jondreville: {totals['jondroville']}"
                 )
 
                 st.markdown(
@@ -774,7 +1022,7 @@ with tab1:
                     st.markdown(
                         f"""
                         <div style="margin: 10px 0;">
-                            <div><strong>Formule :</strong> {html.escape(totals.get('formule_originale', ''))}<br>
+                            <div><strong>{tr("formula")}:</strong> {html.escape(totals.get('formule_originale', ''))}<br>
                                 <span style="display:inline-block; border:2px solid #f5c542; border-radius:999px; padding:2px 8px; background:#fff8e1;">
                                     {html.escape(totals.get('formule_equivalente', ''))}
                                 </span>
@@ -785,7 +1033,7 @@ with tab1:
                     )
 
                 # Affichage du tableau avec info-bulles
-                st.markdown("### Détail des anomalies")
+                st.markdown(f"### {tr('details')}")
 
                 # Formatage des anomalies pour l'affichage
                 anomalies_df = df.iloc[:-1]  # Exclure la ligne TOTAL
@@ -793,31 +1041,31 @@ with tab1:
                 st.markdown(anomalies_html, unsafe_allow_html=True)
 
         else:
-            st.warning("Veuillez entrer une formule caryotypique.")
+            st.warning(tr("missing_formula"))
 
 # Onglet 2: Analyse d'un fichier
 with tab2:
-    st.subheader("Chargez un fichier contenant des formules caryotypiques")
+    st.subheader(tr("upload_title"))
     st.markdown(
         f'<a href="{html.escape(TEST_SHEET_URL)}" target="_blank" '
-        'rel="noopener noreferrer">Ouvrir le Google Sheet des formules de test</a>',
+        f'rel="noopener noreferrer">{tr("open_tests")}</a>',
         unsafe_allow_html=True,
     )
     remote_preview, remote_preview_err = load_google_sheet_preview_v2(TEST_SHEET_URL)
     remote_button_label = preview_button_label(
-        "Analyser le fichier de tests",
+        tr("analyse_tests"),
         remote_preview,
-        "Préanalyse indisponible" if remote_preview_err else None,
+        tr("preview_unavailable") if remote_preview_err else None,
     )
     if LOCAL_TEST_PATH.exists():
         local_preview = load_local_sheet_preview_v2(
             str(LOCAL_TEST_PATH), LOCAL_TEST_PATH.stat().st_mtime
         )
-        local_button_label = preview_button_label("Analyser le fichier local MYC", local_preview)
+        local_button_label = preview_button_label(tr("analyse_local"), local_preview)
     else:
         local_button_label = preview_button_label(
-            "Analyser le fichier local MYC",
-            missing_text="En attente du fichier MYC",
+            tr("analyse_local"),
+            missing_text=tr("waiting_myc"),
         )
 
     test_col, local_col = st.columns([1, 1], gap="small")
@@ -832,13 +1080,13 @@ with tab2:
             "Le fichier chargé est lu en mémoire pour cette session et n'est pas écrit sur disque par l'application."
         )
         local_uploaded_file = st.file_uploader(
-            "Charger le fichier local MYC", type=["csv", "xlsx", "xls"], key="local_myc_file"
+            tr("upload_local"), type=["csv", "xlsx", "xls"], key="local_myc_file"
         )
     else:
         local_uploaded_file = None
 
     uploaded_file = st.file_uploader(
-        "Choisir un autre fichier CSV ou Excel", type=["csv", "xlsx", "xls"], key="file"
+        tr("upload_other"), type=["csv", "xlsx", "xls"], key="file"
     )
  
 
@@ -848,7 +1096,7 @@ with tab2:
         st.session_state["show_local_myc_uploader"] = False
         df_input, err = load_google_sheet(TEST_SHEET_URL)
         if err:
-            st.error(f"Erreur lors du chargement du fichier de tests : {err}")
+            st.error(f"{tr('test_load_error')}: {err}")
             st.stop()
         else:
             st.session_state["df_input"] = df_input
@@ -894,7 +1142,7 @@ with tab2:
                     break
 
             if formule_col is None:
-                st.error("Le fichier doit contenir au moins une colonne 'Formule'.")
+                st.error(tr("required_column"))
             else:
                 # Renommer la colonne trouvée en 'Formule' pour simplifier la suite
                 if formule_col != 'Formule':
@@ -1072,15 +1320,15 @@ with tab2:
 
                 # Affichage des résultats
                 title_col, sort_col = st.columns([1, 0.2])
-                title_col.markdown("### Résultats de l'analyse")
+                title_col.markdown(f"### {tr('results')}")
 
                 # Option de tri par discordance, uniquement si au moins une référence est présente
                 sort_enabled = False
                 if has_count_i or has_count_j:
                     sort_enabled = sort_col.checkbox(
-                        "Trier",
+                        tr("sort"),
                         value=False,
-                        help="Affiche d'abord les lignes discordantes (ISCN ou Jon), dans l'ordre des lignes d'origine."
+                        help=tr("sort_help")
                     )
 
                 # Longueurs de sécurité pour éviter toute désynchronisation
@@ -1088,7 +1336,7 @@ with tab2:
                 display_order = list(range(base_len))
                 if sort_enabled:
                     if base_len < len(results_df) or base_len < len(match_details):
-                        st.warning("Tri non appliqué: longueurs incohérentes des données d'affichage.")
+                        st.warning(f"{tr('sort_not_applied')}: inconsistent display data lengths.")
                     else:
                         try:
                             def sort_key(idx: int):
@@ -1101,20 +1349,26 @@ with tab2:
 
                             display_order = sorted(display_order, key=sort_key)
                         except Exception as sort_err:
-                            st.warning(f"Tri non appliqué (erreur: {sort_err})")
+                            st.warning(f"{tr('sort_not_applied')}: {sort_err}")
 
                 header_cells = []
                 for label in display_labels:
                     if label == "Ligne":
                         header_cells.append(
                             '<th class="line-jump-header">'
-                            '<div class="line-jump-title">Ligne</div>'
+                            f'<div class="line-jump-title">{tr("line")}</div>'
                             '<input class="line-jump-input" type="number" min="1" '
-                            'placeholder="N°" aria-label="Aller à une ligne">'
+                            f'placeholder="N°" aria-label="{tr("go_to_row")}">'
                             '</th>'
                         )
                     else:
-                        header_cells.append(f"<th>{html.escape(label)}</th>")
+                        translated_headers = {
+                            "Formule": tr("formula"),
+                            "Comptage ISCN": tr("count_iscn"),
+                            "Comptage Jon": tr("count_jon"),
+                            "Anomalies détectées": tr("detected_anomalies"),
+                        }
+                        header_cells.append(f"<th>{html.escape(translated_headers.get(label, label))}</th>")
                 header_html = "".join(header_cells)
 
                 body_rows = []
@@ -1234,7 +1488,7 @@ with tab2:
                     match_i = match_summary["iscn"]["ok"]
                     if total_i:
                         percent_i = format_percent(match_summary["iscn"]["percent"])
-                        msg_i = f"Correspondance ISCN: {match_i}/{total_i} ({percent_i}%)"
+                        msg_i = f"{tr('match')} ISCN: {match_i}/{total_i} ({percent_i}%)"
 
                         def render_iscn(col, message=msg_i):
                             col.success(message)
@@ -1246,7 +1500,7 @@ with tab2:
                     match_j = match_summary["jon"]["ok"]
                     if total_j:
                         percent_j = format_percent(match_summary["jon"]["percent"])
-                        msg_j = f"Correspondance Jondreville: {match_j}/{total_j} ({percent_j}%)"
+                        msg_j = f"{tr('match')} Jondreville: {match_j}/{total_j} ({percent_j}%)"
 
                         def render_jon(col, message=msg_j):
                             col.success(message)
@@ -1271,11 +1525,15 @@ with tab2:
                     columns[idx].markdown("&nbsp;", unsafe_allow_html=True)
                 
         except Exception as e:
-            st.error(f"Erreur lors de l'analyse du fichier: {str(e)}")
+            st.error(f"{tr('file_analysis_error')}: {str(e)}")
 
 # CSS pour améliorer l'apparence
 st.markdown("""
 <style>
+    .header-link:hover {
+        opacity: 0.72;
+    }
+
     .download-button {
         display: inline-flex;
         align-items: center;
@@ -1797,4 +2055,4 @@ st.markdown("""
 
 # Pied de page
 st.markdown("---")
-st.markdown("Application développée pour l'analyse des formules caryotypiques selon les normes ISCN 2024")
+st.markdown(tr("footer"))

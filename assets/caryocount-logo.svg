@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Caryocount logo</title>
+  <desc id="desc">A stylised chromosome containing mathematical counting symbols.</desc>
+  <defs>
+    <linearGradient id="caryocount-gradient" x1="12" y1="8" x2="48" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#F8FAFC"/>
+  <path d="M17 13c5-4 11-2 14 3 2 4 2 8 1 12-1 3-1 5 0 8 2 4 2 9 0 13-3 5-9 7-14 3-5-3-5-9-1-14l4-6-4-6c-4-5-4-10 0-13Z" fill="url(#caryocount-gradient)"/>
+  <path d="M31 16c3-5 9-7 14-3 4 3 4 8 0 13l-4 6 4 6c4 5 4 11-1 14-5 4-11 2-14-3-2-4-2-9 0-13 1-3 1-5 0-8-1-4-1-8 1-12Z" fill="url(#caryocount-gradient)" opacity=".82"/>
+  <g fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 21h8M23 17v8"/>
+    <path d="m36 18 6 6m0-6-6 6"/>
+    <path d="M23 41h18M23 47h18"/>
+  </g>
+</svg>

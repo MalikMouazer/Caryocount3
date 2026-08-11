@@ -161,17 +161,17 @@ def load_local_english_rule_texts():
         return {}
     required = {
         "Rule ID",
-        "Libellé v_EN",
-        "Explication v_EN",
-        "Critère technique v_EN",
+        "Label EN",
+        "Explanation EN",
+        "Technical criterion EN",
     }
     if not required.issubset(catalog.columns):
         return {}
     return {
         str(row["Rule ID"]).strip(): {
-            "title": str(row["Libellé v_EN"]).strip(),
-            "explanation": str(row["Explication v_EN"]).strip(),
-            "technical_check": str(row["Critère technique v_EN"]).strip(),
+            "title": str(row["Label EN"]).strip(),
+            "explanation": str(row["Explanation EN"]).strip(),
+            "technical_check": str(row["Technical criterion EN"]).strip(),
         }
         for _, row in catalog.iterrows()
         if str(row.get("Rule ID", "")).strip()
@@ -360,14 +360,18 @@ def normalize_rule_catalog_frame(df):
         "title": "Libellé",
         "explication": "Explication",
         "explanation": "Explication",
-        "libelle v_en": "Libellé v_EN",
-        "libellé v_en": "Libellé v_EN",
-        "label v_en": "Libellé v_EN",
-        "explication v_en": "Explication v_EN",
-        "explanation v_en": "Explication v_EN",
-        "critere technique v_en": "Critère technique v_EN",
-        "critère technique v_en": "Critère technique v_EN",
-        "technical criterion v_en": "Critère technique v_EN",
+        "label en": "Label EN",
+        "explanation en": "Explanation EN",
+        "technical criterion en": "Technical criterion EN",
+        # Anciens intitulés acceptés pendant la migration du Google Sheet.
+        "libelle v_en": "Label EN",
+        "libellé v_en": "Label EN",
+        "label v_en": "Label EN",
+        "explication v_en": "Explanation EN",
+        "explanation v_en": "Explanation EN",
+        "critere technique v_en": "Technical criterion EN",
+        "critère technique v_en": "Technical criterion EN",
+        "technical criterion v_en": "Technical criterion EN",
     }
     return df.rename(
         columns={
@@ -408,7 +412,7 @@ def compare_rule_catalogs(reference_df, distant_df):
     extra = sorted(distant_ids - reference_ids)
     differences = []
     editable_columns = (
-        ("Libellé v_EN", "Explication v_EN", "Critère technique v_EN")
+        ("Label EN", "Explanation EN", "Technical criterion EN")
         if language == "en"
         else ("Libellé", "Explication")
     )
@@ -436,9 +440,9 @@ def compare_rule_catalogs(reference_df, distant_df):
 def render_rule_catalog_table(reference_df, distant_df=None):
     """Affiche le référentiel et ses discordances dans un tableau unique."""
 
-    label_column = "Libellé v_EN" if language == "en" else "Libellé"
-    explanation_column = "Explication v_EN" if language == "en" else "Explication"
-    technical_column = "Critère technique v_EN" if language == "en" else "Critère technique"
+    label_column = "Label EN" if language == "en" else "Libellé"
+    explanation_column = "Explanation EN" if language == "en" else "Explication"
+    technical_column = "Technical criterion EN" if language == "en" else "Critère technique"
     columns = [
         "Rule ID",
         "Référentiel",
@@ -557,9 +561,9 @@ def render_rule_catalog_table(reference_df, distant_df=None):
         "Critère technique": "Technical criterion" if language == "en" else "Critère technique",
         "Libellé": "Label" if language == "en" else "Libellé",
         "Explication": "Explanation" if language == "en" else "Explication",
-        "Libellé v_EN": "Label",
-        "Explication v_EN": "Explanation",
-        "Critère technique v_EN": "Technical criterion",
+        "Label EN": "Label",
+        "Explanation EN": "Explanation",
+        "Technical criterion EN": "Technical criterion",
     }
     headers = "".join(
         f"<th>{html.escape(catalog_headers.get(column, column))}</th>"
@@ -1096,9 +1100,9 @@ with st.expander(tr("rules")):
             catalog_warning_slot.warning(tr("english_catalog_pending"))
         render_rule_catalog_table(internal_catalog)
     elif language == "en" and not {
-        "Libellé v_EN",
-        "Explication v_EN",
-        "Critère technique v_EN",
+        "Label EN",
+        "Explanation EN",
+        "Technical criterion EN",
     }.issubset(normalize_rule_catalog_frame(distant_catalog).columns):
         catalog_warning_slot.warning(tr("english_catalog_pending"))
         render_rule_catalog_table(internal_catalog)

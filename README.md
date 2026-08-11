@@ -112,7 +112,7 @@ supported columns are:
 
 - `Rule ID`
 - `Libellé` and `Explication`
-- `Libellé v_EN`, `Explication v_EN` and `Critère technique v_EN`
+- `Label EN`, `Explanation EN` and `Technical criterion EN`
 - `Référentiel`, `Score par défaut` and `Critère technique` for reference
 
 To use a different published sheet in a deployment, set

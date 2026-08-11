@@ -94,9 +94,9 @@ def main() -> None:
             "Critère technique": checks.get(rule_id, ""),
             "Libellé": title,
             "Explication": explanation,
-            "Libellé v_EN": ENGLISH_TEXTS[rule_id][0],
-            "Explication v_EN": ENGLISH_TEXTS[rule_id][1],
-            "Critère technique v_EN": (
+            "Label EN": ENGLISH_TEXTS[rule_id][0],
+            "Explanation EN": ENGLISH_TEXTS[rule_id][1],
+            "Technical criterion EN": (
                 f"Detection criterion: {ENGLISH_TEXTS[rule_id][1]} "
                 f"Default score: {score}."
             ),
@@ -123,9 +123,9 @@ def main() -> None:
         "Critère technique",
         "Libellé",
         "Explication",
-        "Libellé v_EN",
-        "Explication v_EN",
-        "Critère technique v_EN",
+        "Label EN",
+        "Explanation EN",
+        "Technical criterion EN",
     ]
 
     with DESTINATION.open("w", encoding="utf-8", newline="") as stream:

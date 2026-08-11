@@ -88,6 +88,7 @@ TRANSLATIONS = {
         "file_analysis_error": "Could not analyse the file",
         "sort_not_applied": "Sort not applied",
         "go_to_row": "Go to a row",
+        "english_catalog_pending": "The English rule texts are awaiting verification in the Google Sheet.",
     },
     "fr": {
         "documentation": "Documentation",
@@ -141,6 +142,7 @@ TRANSLATIONS = {
         "file_analysis_error": "Erreur lors de l'analyse du fichier",
         "sort_not_applied": "Tri non appliqué",
         "go_to_row": "Aller à une ligne",
+        "english_catalog_pending": "Les textes anglais des règles sont en attente de vérification dans le Google Sheet.",
     },
 }
 
@@ -148,6 +150,35 @@ language = st.session_state.get("language", "en")
 
 def tr(key):
     return TRANSLATIONS[language][key]
+
+
+def load_local_english_rule_texts():
+    """Charge les traductions canoniques sans dépendre du Google Sheet."""
+
+    try:
+        catalog = pd.read_csv(RULE_CATALOG_REFERENCE_PATH)
+    except Exception:
+        return {}
+    required = {
+        "Rule ID",
+        "Libellé v_EN",
+        "Explication v_EN",
+        "Critère technique v_EN",
+    }
+    if not required.issubset(catalog.columns):
+        return {}
+    return {
+        str(row["Rule ID"]).strip(): {
+            "title": str(row["Libellé v_EN"]).strip(),
+            "explanation": str(row["Explication v_EN"]).strip(),
+            "technical_check": str(row["Critère technique v_EN"]).strip(),
+        }
+        for _, row in catalog.iterrows()
+        if str(row.get("Rule ID", "")).strip()
+    }
+
+
+ENGLISH_RULE_TEXTS = load_local_english_rule_texts()
 
 # Utilitaire pour charger une feuille Google Sheets publique
 def load_google_sheet(url_or_id):
@@ -329,6 +360,14 @@ def normalize_rule_catalog_frame(df):
         "title": "Libellé",
         "explication": "Explication",
         "explanation": "Explication",
+        "libelle v_en": "Libellé v_EN",
+        "libellé v_en": "Libellé v_EN",
+        "label v_en": "Libellé v_EN",
+        "explication v_en": "Explication v_EN",
+        "explanation v_en": "Explication v_EN",
+        "critere technique v_en": "Critère technique v_EN",
+        "critère technique v_en": "Critère technique v_EN",
+        "technical criterion v_en": "Critère technique v_EN",
     }
     return df.rename(
         columns={
@@ -368,8 +407,18 @@ def compare_rule_catalogs(reference_df, distant_df):
     missing = sorted(reference_ids - distant_ids)
     extra = sorted(distant_ids - reference_ids)
     differences = []
+    editable_columns = (
+        ("Libellé v_EN", "Explication v_EN", "Critère technique v_EN")
+        if language == "en"
+        else ("Libellé", "Explication")
+    )
+    missing_columns = [column for column in editable_columns if column not in distant_df.columns]
+    if missing_columns:
+        raise ValueError(
+            "Missing Google Sheet column(s): " + ", ".join(missing_columns)
+        )
     for rule_id in sorted(reference_ids & distant_ids):
-        for column in ("Libellé", "Explication"):
+        for column in editable_columns:
             internal_value = normalized_catalog_text(reference_rows[rule_id].get(column))
             distant_value = normalized_catalog_text(distant_rows[rule_id].get(column))
             if internal_value != distant_value:
@@ -387,13 +436,16 @@ def compare_rule_catalogs(reference_df, distant_df):
 def render_rule_catalog_table(reference_df, distant_df=None):
     """Affiche le référentiel et ses discordances dans un tableau unique."""
 
+    label_column = "Libellé v_EN" if language == "en" else "Libellé"
+    explanation_column = "Explication v_EN" if language == "en" else "Explication"
+    technical_column = "Critère technique v_EN" if language == "en" else "Critère technique"
     columns = [
         "Rule ID",
         "Référentiel",
         "Score par défaut",
-        "Critère technique",
-        "Libellé",
-        "Explication",
+        technical_column,
+        label_column,
+        explanation_column,
     ]
     reference_df = normalize_rule_catalog_frame(reference_df)
     has_distant_catalog = distant_df is not None
@@ -459,7 +511,7 @@ def render_rule_catalog_table(reference_df, distant_df=None):
         displayed = dict(source or {})
         if not is_missing and not is_extra:
             distant_row = distant_rows.get(rule_id, {})
-            for column in ("Libellé", "Explication"):
+            for column in (technical_column, label_column, explanation_column):
                 if column in distant_row:
                     displayed[column] = normalized_catalog_text(distant_row.get(column))
 
@@ -505,6 +557,9 @@ def render_rule_catalog_table(reference_df, distant_df=None):
         "Critère technique": "Technical criterion" if language == "en" else "Critère technique",
         "Libellé": "Label" if language == "en" else "Libellé",
         "Explication": "Explanation" if language == "en" else "Explication",
+        "Libellé v_EN": "Label",
+        "Explication v_EN": "Explanation",
+        "Critère technique v_EN": "Technical criterion",
     }
     headers = "".join(
         f"<th>{html.escape(catalog_headers.get(column, column))}</th>"
@@ -722,6 +777,11 @@ def format_anomalies_compact(anomalies_df):
     clone_blocks = {}
     clone_order = []
 
+    def english_rule_text(rule_id, field, fallback=""):
+        if language != "en":
+            return fallback
+        return ENGLISH_RULE_TEXTS.get(str(rule_id or ""), {}).get(field, fallback)
+
     def add_line(clone_label, line_html):
         key = clone_label or ""
         if key not in clone_blocks:
@@ -753,7 +813,10 @@ def format_anomalies_compact(anomalies_df):
             return ""
 
         applied_text = ""
-        if isinstance(applied_explanation, str) and applied_explanation.strip():
+        translated_applied = english_rule_text(rule_id, "explanation")
+        if translated_applied:
+            applied_text = translated_applied
+        elif isinstance(applied_explanation, str) and applied_explanation.strip():
             applied_text = applied_explanation.strip()
         elif applied_explanation is not None and not (
             isinstance(applied_explanation, float) and pd.isna(applied_explanation)
@@ -763,19 +826,25 @@ def format_anomalies_compact(anomalies_df):
         popover_id = f"rule-popover-{uuid.uuid4().hex}"
         items = []
         for step in path:
+            translated_step = ENGLISH_RULE_TEXTS.get(str(step.get("rule_id") or ""), {})
             selected = bool(step["selected"])
             step_class = " selected" if selected else ""
             marker = tr("selected") if selected else tr("tested_before")
             score_text = step.get("default_score")
             score_html = f" · score {html.escape(str(score_text))}" if score_text != "" else ""
             open_attr = " open" if selected else ""
-            technical_check = str(step.get("technical_check") or "").strip()
+            technical_check = str(
+                translated_step.get("technical_check", step.get("technical_check"))
+                or ""
+            ).strip()
             technical_html = (
                 f'<div class="rule-detail-block"><strong>{tr("technical_criterion")}:</strong> {html.escape(technical_check)}</div>'
                 if technical_check
                 else ""
             )
-            explanation = str(step.get("explanation") or "").strip()
+            explanation = str(
+                translated_step.get("explanation", step.get("explanation")) or ""
+            ).strip()
             explanation_html = (
                 f'<div class="rule-detail-block"><strong>{tr("clinical_explanation")}:</strong> {html.escape(explanation)}</div>'
                 if explanation
@@ -788,7 +857,7 @@ def format_anomalies_compact(anomalies_df):
                 f'<summary>'
                 f'<span><strong>{html.escape(str(step["rule_id"]))}</strong>'
                 f' <em>{html.escape(marker)}</em>{score_html}<br>'
-                f'<span class="rule-title">{html.escape(str(step["title"]))}</span></span>'
+                f'<span class="rule-title">{html.escape(str(translated_step.get("title", step["title"])))}</span></span>'
                 f'</summary>'
                 f'<div class="rule-detail-panel">'
                 f'{explanation_html}'
@@ -837,6 +906,9 @@ def format_anomalies_compact(anomalies_df):
         explication_jon = clean_text(row.get('Explication Jondreville 2020'))
         rule_id_iscn = row.get('RuleID_ISCN') or ''
         rule_id_jon = row.get('RuleID_Jon') or ''
+        if language == "en":
+            explication_iscn = clean_text(english_rule_text(rule_id_iscn, "explanation", "—"))
+            explication_jon = clean_text(english_rule_text(rule_id_jon, "explanation", "—"))
         rule_explanation_iscn = row.get('RuleExplanation_ISCN') or row.get('Explication')
         rule_explanation_jon = row.get('RuleExplanation_Jon') or row.get('Explication Jondreville 2020')
         clone_details = row.get('CloneDetails')
@@ -874,8 +946,8 @@ def format_anomalies_compact(anomalies_df):
             line_html = (
                 f'<div class="anomaly-line" style="border-left-color: {color};">'
                 f'<span class="anomaly-label" style="color: {color};">{anomaly_label}</span>'
-                f'<span class="score-pill score-pill-iscn">{build_pill_text("ISCN", line_score_iscn, line_exp_iscn, type_text, rule_id_iscn, rule_explanation_iscn)}</span>'
-                f'<span class="score-pill score-pill-jon">{build_pill_text("Jon", line_score_jon, line_exp_jon, type_text, rule_id_jon, rule_explanation_jon)}</span>'
+                f'<span class="score-pill score-pill-iscn">{build_pill_text("ISCN", line_score_iscn, line_exp_iscn, clean_text(english_rule_text(rule_id_iscn, "title", type_text)) if language == "en" else type_text, rule_id_iscn, rule_explanation_iscn)}</span>'
+                f'<span class="score-pill score-pill-jon">{build_pill_text("Jon", line_score_jon, line_exp_jon, clean_text(english_rule_text(rule_id_jon, "title", type_text)) if language == "en" else type_text, rule_id_jon, rule_explanation_jon)}</span>'
                 '</div>'
             )
 
@@ -952,6 +1024,7 @@ def render_score_totals(score_iscn, score_jon):
     """
 
 # Interface utilisateur
+catalog_warning_slot = st.empty()
 with st.expander(tr("rules")):
     if RULE_CATALOG_SHEET_URL:
         st.markdown(
@@ -987,6 +1060,15 @@ with st.expander(tr("rules")):
     distant_catalog, distant_catalog_error = load_google_sheet(RULE_CATALOG_SHEET_URL)
     if distant_catalog_error:
         st.warning(f"{tr('remote_load_error')}: {distant_catalog_error}")
+        if language == "en":
+            catalog_warning_slot.warning(tr("english_catalog_pending"))
+        render_rule_catalog_table(internal_catalog)
+    elif language == "en" and not {
+        "Libellé v_EN",
+        "Explication v_EN",
+        "Critère technique v_EN",
+    }.issubset(normalize_rule_catalog_frame(distant_catalog).columns):
+        catalog_warning_slot.warning(tr("english_catalog_pending"))
         render_rule_catalog_table(internal_catalog)
     else:
         try:

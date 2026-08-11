@@ -1,88 +1,136 @@
-## Dépendances
+# Caryocount
 
-Ce projet utilise plusieurs bibliothèques open source. Les bibliothèques suivantes sont incluses dans le code source de ce projet, mais n'ont pas été modifiées.
+Caryocount is an open-source, rule-based application for parsing cytogenetic
+formulas and applying two anomaly-counting systems: ISCN 2024 and Jondreville
+2020. Unlike a statistical or machine-learning model, it follows an explicit,
+ordered catalogue of rules. The same input and software version therefore
+produce the same result, and each reported count can be traced to the rule that
+was applied.
 
-### Bibliothèques utilisées :
+- **Online application:** https://caryocount3.streamlit.app/
+- **Source code:** https://github.com/MalikMouazer/Caryocount3
+- **Test spreadsheet:** https://docs.google.com/spreadsheets/d/1_QPAzEr3PNHaNVu8Qxuv_hWCUoBQqqRcNSnX-Q0Egm8/edit?gid=98233212#gid=98233212
+- **Official ISCN 2024 reference:** https://doi.org/10.1159/000538512
+- **ISCN 2024 errata:** https://karger.com/cgr/article/165/2/99/920397/Erratum and https://karger.com/cgr/article/166/1/64/939149/Erratum-ISCN-2024-An-International-System-for
 
-- **openpyxl**
-  - Lien vers le projet : https://github.com/soxhub/openpyxl 
-- **et_xmlfile**
-  - Lien vers le projet : https://github.com/biydnd/et_xmlfile 
+The example formulas in the test spreadsheet are derived from examples in the
+official ISCN guide and are provided for software testing and demonstration.
+Users should consult the licensed ISCN publication and its errata for the
+authoritative nomenclature. Caryocount supports counting and review; it does not
+replace cytogenetic interpretation or clinical validation.
 
-## Maintenir les règles de scoring
+## Quick start
 
-Les règles métier sont centralisées dans `My_expert_karyo_functions.py`.
+### Use the hosted application
 
-- `RULE_CATALOG` décrit les règles visibles dans l'application : identifiant, référentiel, score par défaut, libellé et explication.
-- `RULE_CATALOG` reste la source canonique des IDs, du nombre de règles, des référentiels et des scores.
-- `RULE_TECHNICAL_CHECKS` décrit ce que le code vérifie concrètement pour chaque règle : expression régulière, préfixe, fonction métier ou relation entre clones.
-- `rules_catalog_reference.csv` est la photographie interne suivie par Git. Sa colonne `N°` matérialise l'ordre de priorité propre à chaque référentiel. Le fichier doit être régénéré dans le même commit que tout ajout, modification ou suppression de règle.
-- Les lignes du CSV et leurs numéros dans l'interface suivent `RULE_PRIORITY`, donc le numéro affiché correspond exactement à l'ordre réel d'évaluation montré dans le parcours des règles.
-- Une feuille Google Sheets publique peut surcharger uniquement les colonnes `Libellé` et `Explication`.
-- `RuleDecision` est la décision effectivement appliquée pendant le calcul.
-- `analyser_formule(..., debug=True)` ajoute les colonnes `RuleID_ISCN`, `RuleID_Jon` et les explications techniques associées.
-- L'application affiche un bouton `(?)` devant chaque comptage ISCN/Jon pour montrer le parcours des règles jusqu'à la règle retenue.
+1. Open https://caryocount3.streamlit.app/.
+2. Select English or French.
+3. Enter one ISCN formula for an immediate analysis, or upload a CSV/XLS/XLSX
+   file containing a `Formule` column for batch analysis.
+4. Review the ISCN 2024 and Jondreville 2020 totals and use the `(?)` control to
+   inspect the ordered rule path and the selected rule.
+5. Download the batch results as an Excel file when required.
 
-### Catalogue public Google Sheets
+Simple formulas for a first check:
 
-Créer une feuille Google Sheets publiée avec ces colonnes :
-
-- `Rule ID` : obligatoire, doit correspondre exactement à un ID existant dans `RULE_CATALOG`.
-- `Critère technique` : aide à la rédaction, générée par le code, à ne pas modifier dans la feuille.
-- `Libellé` : modifiable par les utilisateurs métier.
-- `Explication` : modifiable par les utilisateurs métier.
-- `Référentiel` et `Score par défaut` peuvent être gardés dans la feuille pour lecture, mais ils sont ignorés par l'application.
-
-Configurer ensuite l'application avec la variable d'environnement :
-
-```bash
-RULE_CATALOG_SHEET_URL="https://docs.google.com/spreadsheets/d/.../edit?gid=0"
+```text
+46,XX[20]
+47,XX,+8[20]
+46,XY,t(9;22)(q34;q11.2)[20]
+46,XX,del(5)(q13q33)[20]
 ```
 
-La feuille ne peut pas ajouter de règle, supprimer de règle, changer un score, changer un ID ou changer le critère technique. Si elle contient un `Rule ID` inconnu, le chargement est refusé et l'application revient au catalogue interne.
+More complex, multi-clone examples are available in the public test
+spreadsheet linked above.
 
-### Bonne conduite quand une règle change
+### Run locally
 
-Si la modification est uniquement clinique ou rédactionnelle :
-
-1. Modifier `Libellé` et/ou `Explication` dans le Google Sheet.
-2. Ne pas modifier `Rule ID`, `Référentiel`, `Score par défaut` ni `Critère technique`.
-
-Si la logique de calcul change :
-
-1. Modifier la condition ou le score dans la fonction de calcul concernée.
-2. Mettre à jour l'entrée correspondante dans `RULE_CATALOG` si le libellé interne, le score par défaut ou le référentiel changent.
-3. Mettre à jour `RULE_TECHNICAL_CHECKS` avec le test concret réellement codé : regex utilisée, préfixe testé, normalisation appliquée, compteurs, relation entre clones ou règle d'exclusion.
-4. Vérifier que l'ID existe aussi dans `RULE_PRIORITY`, dans l'ordre réel d'évaluation.
-5. Lancer `validate_rule_catalog_integrity()` pour contrôler la cohérence catalogue/priorités.
-6. Vérifier qu'il existe un critère technique pour chaque `Rule ID`.
-7. Lancer une comparaison avec `compare_sheet.py` sur le fichier de référence.
-
-Si une nouvelle règle est ajoutée :
-
-1. Créer un `Rule ID` stable et explicite.
-2. Ajouter le `RuleSpec` dans `RULE_CATALOG`.
-3. Ajouter le critère dans `RULE_TECHNICAL_CHECKS`.
-4. Ajouter l'ID dans `RULE_PRIORITY` à l'endroit où la règle est réellement testée.
-5. Ajouter ou mettre à jour des exemples de référence couvrant cette règle.
-
-Après toute création, modification ou suppression de règle, régénérer le CSV interne :
+Python 3.10 or later is recommended.
 
 ```bash
-python scripts/sync_rule_catalog_reference.py
+git clone https://github.com/MalikMouazer/Caryocount3.git
+cd Caryocount3
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+streamlit run app.py
 ```
 
-L'application compare automatiquement ce CSV avec le Google Sheet dans le tableau
-principal, numéroté séparément (`1_ISCN`, `1_JON`, etc.) pour chaque référentiel.
-L'en-tête et la colonne `Rule ID` restent figés pendant le défilement. Une règle
-absente du fichier distant apparaît en bleu à sa
-position canonique; une règle présente uniquement dans le distant apparaît en
-rouge. Les cellules distantes `Libellé` ou `Explication` différentes apparaissent
-en jaune et affichent directement les versions distante et interne à harmoniser.
+The application will print a local URL, usually `http://localhost:8501`.
 
-Si deux situations ont le même score mais nécessitent des explications cliniques
-différentes, elles doivent avoir deux `Rule ID` différents. Exemple :
-`CONSTITUTIONAL_GAIN`, `CONSTITUTIONAL_SUSPECT` et
-`CONSTITUTIONAL_CERTAIN` valent tous 0, mais ils restent séparés pour que les
-cliniciens puissent rédiger un libellé et une explication adaptés dans le
-Google Sheet.
+## How the method works
+
+The input formula is normalized and divided into clones and individual
+abnormalities. Condensed notations, multiplicities, constitutional findings,
+repeated-clone notation and relationships between structural abnormalities are
+then identified. Each abnormality is evaluated against a fixed priority list.
+The first applicable rule determines its score; rules assigning zero prevent
+events already represented elsewhere from being counted twice. The application
+returns anomaly-level decisions and totals for both supported scoring systems.
+
+The rule engine is deterministic: it contains no trained model, probabilistic
+classification or generative component. Rule identifiers, priorities, default
+scores, explanations and technical checks are exposed in the application. This
+makes a result auditable and reproducible for a given input and code version.
+
+## Maintaining the scoring rules
+
+The business rules are centralized in `My_expert_karyo_functions.py`:
+
+- `RULE_CATALOG` is the canonical source for stable rule IDs, scoring systems,
+  default scores, labels and explanations.
+- `RULE_PRIORITY` records the actual evaluation order for each scoring system.
+- `RULE_TECHNICAL_CHECKS` documents the condition implemented for every rule.
+- `rules_catalog_reference.csv` is the version-controlled snapshot displayed
+  and checked by the application.
+- `RuleDecision` records the rule actually applied during calculation.
+- `analyser_formule(..., debug=True)` exposes rule IDs and technical
+  explanations in its output.
+
+This separation keeps the software maintainable: clinical wording can be
+reviewed independently, while changes to scoring logic remain explicit,
+version-controlled and reviewable in the open-source repository.
+
+After adding, modifying or removing a rule:
+
+1. Update its condition and score in the relevant calculation function.
+2. Update `RULE_CATALOG`, `RULE_TECHNICAL_CHECKS` and `RULE_PRIORITY` together.
+3. Add or update examples covering the changed behaviour.
+4. Regenerate the internal catalogue:
+
+   ```bash
+   python scripts/sync_rule_catalog_reference.py
+   ```
+
+5. Run `validate_rule_catalog_integrity()` and compare the generated catalogue
+   with the public catalogue before committing the change.
+
+### Public rule catalogue
+
+A published Google Sheet may provide reviewed French and English wording. Its
+supported columns are:
+
+- `Rule ID`
+- `Libellé` and `Explication`
+- `Libellé v_EN`, `Explication v_EN` and `Critère technique v_EN`
+- `Référentiel`, `Score par défaut` and `Critère technique` for reference
+
+To use a different published sheet in a deployment, set
+`RULE_CATALOG_SHEET_URL` in `app.py` to its published URL:
+
+```python
+RULE_CATALOG_SHEET_URL = "https://docs.google.com/spreadsheets/d/.../edit?gid=0"
+```
+
+The sheet cannot silently add or remove rules, change IDs, alter scores or
+replace executable criteria. Unknown IDs or structural differences are
+reported, and the application falls back to the version-controlled catalogue
+when the remote content cannot be safely used.
+
+## Reproducibility and scope
+
+For reproducible reporting, retain the exact input formula, the Caryocount Git
+commit, the selected scoring system and the output file. Results depend on the
+implemented scope of the parser and rule catalogue. New or unusual ISCN
+constructs should be reviewed by a qualified cytogeneticist and added through a
+documented rule and regression example when appropriate.

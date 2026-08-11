@@ -621,6 +621,14 @@ st.markdown(
             white-space: nowrap;
         }
 
+        .header-nav {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 18px;
+            min-width: 0;
+        }
+
         .header-link svg {
             display: block;
             width: 19px;
@@ -646,14 +654,38 @@ st.markdown(
             flex: 0 0 20px;
             fill: currentColor;
         }
+
+        @media (max-width: 950px) {
+            .header-nav {
+                gap: 12px;
+            }
+
+            .header-link {
+                justify-content: center;
+                width: 38px;
+                height: 38px;
+                border-radius: 8px;
+            }
+
+            .header-link span {
+                display: none;
+            }
+
+            .header-link svg {
+                width: 21px;
+                height: 21px;
+                flex-basis: 21px;
+            }
+        }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-# En-tête compact
-brand_col, docs_col, github_col, language_col = st.columns([7, 1.5, 1, 1.2], vertical_alignment="center")
+# En-tête compact. Les liens partagent une même colonne flexible afin de ne pas
+# déborder les uns sur les autres lorsque la fenêtre se rétrécit.
+brand_col, links_col, language_col = st.columns([7, 2.5, 1.5], vertical_alignment="center")
 brand_logo_svg = LOGO_PATH.read_text(encoding="utf-8")
 brand_col.markdown(
     f"""
@@ -664,25 +696,25 @@ brand_col.markdown(
     """,
     unsafe_allow_html=True,
 )
-docs_col.markdown(
+links_col.markdown(
     f"""
-    <a class="header-link" href="{DOCUMENTATION_URL}" target="_blank" rel="noopener noreferrer">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 2h8l4 4v16H6V2zm8 1.5V7h3.5L14 3.5zM8 11h8V9H8v2zm0 4h8v-2H8v2zm0 4h6v-2H8v2z"/>
-        </svg>
-        <span>{tr('documentation')}</span>
-    </a>
-    """,
-    unsafe_allow_html=True,
-)
-github_col.markdown(
-    f"""
-    <a class="header-link" href="{GITHUB_URL}" target="_blank" rel="noopener noreferrer">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.7-1.28-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.19-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.18c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7z"/>
-        </svg>
-        <span>GitHub</span>
-    </a>
+    <nav class="header-nav" aria-label="Project links">
+        <a class="header-link" href="{DOCUMENTATION_URL}" target="_blank"
+           rel="noopener noreferrer" title="{tr('documentation')}"
+           aria-label="{tr('documentation')}">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 2h8l4 4v16H6V2zm8 1.5V7h3.5L14 3.5zM8 11h8V9H8v2zm0 4h8v-2H8v2zm0 4h6v-2H8v2z"/>
+            </svg>
+            <span>{tr('documentation')}</span>
+        </a>
+        <a class="header-link" href="{GITHUB_URL}" target="_blank"
+           rel="noopener noreferrer" title="GitHub" aria-label="GitHub">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.7-1.28-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.19-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.18c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7z"/>
+            </svg>
+            <span>GitHub</span>
+        </a>
+    </nav>
     """,
     unsafe_allow_html=True,
 )
